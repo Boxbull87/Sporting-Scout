@@ -318,6 +318,18 @@ input:focus,select:focus,button:focus-visible{outline:2px solid var(--rojo);outl
   </div>
 </div>
 
+<div class="modal" id="modalExport">
+  <div class="caja" style="max-width:380px">
+    <div class="caja-cuerpo" style="text-align:center;padding:22px 18px">
+      <h3 id="expTitulo" style="font-family:var(--display);font-size:16px;text-transform:uppercase;letter-spacing:.04em">Exportando…</h3>
+      <progress id="expBarra" value="0" max="1" style="width:100%;margin:16px 0"></progress>
+      <p style="color:var(--muted);font-size:11px;line-height:1.5;margin-bottom:14px">
+        No cierres esta pestaña ni toques el vídeo mientras exporta.</p>
+      <button class="btn" id="expCancelar">Cancelar</button>
+    </div>
+  </div>
+</div>
+
 <input type="file" id="ficheroVideo" accept="video/*" style="display:none">
 <input type="file" id="ficheroJson" accept="application/json,.json" style="display:none">
 <div class="toast" id="toast"></div>
@@ -847,8 +859,9 @@ function abrirEventos(){
       <td>${ev.resultado||'—'}</td>
       <td class="tc" style="color:var(--muted)">${tc(ev.t_in)}–${tc(ev.t_out)}</td>
       <td style="text-align:right;white-space:nowrap">
-        <button class="btn" style="padding:2px 8px" onclick="irA(${ev.t_in})">Ver</button>
-        <button class="btn" style="padding:2px 8px" onclick="borrarEvento('${ev.id}')">Borrar</button>
+        <button class="btn" style="padding:2px 6px" onclick="irA(${ev.t_in})">Ver</button>
+        <button class="btn" style="padding:2px 6px" onclick="descargarClipUnico('${ev.id}')" ${esLocal?'':'disabled'}>Descargar</button>
+        <button class="btn" style="padding:2px 6px" onclick="borrarEvento('${ev.id}')">Borrar</button>
       </td></tr>`;
   }).join('');
 
@@ -859,19 +872,33 @@ function abrirEventos(){
 
   modal('Eventos · '+estado.eventos.length, `
     ${avisoClips}
-    <div class="fila-form" style="margin-bottom:10px">
+    <div class="fila-form" style="margin-bottom:6px">
       <button class="btn" onclick="marcarTodosExport(true)" ${esLocal?'':'disabled'}>Marcar todos</button>
       <button class="btn" onclick="marcarTodosExport(false)" ${esLocal?'':'disabled'}>Marcar ninguno</button>
-      <div class="campo">
-        <label>Modo de corte</label>
-        <select id="modoCorte" ${esLocal?'':'disabled'}>
-          <option value="copy">Rápido (puede desplazarse ±1-2s)</option>
-          <option value="exacto">Exacto (recodifica, más lento)</option>
-        </select>
-      </div>
-      <button class="btn btn-rojo" onclick="exportarClipsFFmpeg('bat')" ${esLocal?'':'disabled'}>Script .bat (Windows)</button>
-      <button class="btn" onclick="exportarClipsFFmpeg('sh')" ${esLocal?'':'disabled'}>Script .sh (Mac/Linux)</button>
     </div>
+    <div class="fila-form" style="margin-bottom:6px">
+      <button class="btn btn-rojo" onclick="descargarClipsDirecto()" ${esLocal?'':'disabled'}>Descargar clips seleccionados</button>
+      <span style="color:var(--muted);font-size:11px;max-width:280px">
+        Recomendado: descarga directa desde el navegador, sin instalar nada. Graba en tiempo real
+        (un clip de 10s tarda ~10s).</span>
+    </div>
+    <details style="margin-bottom:12px">
+      <summary style="cursor:pointer;color:var(--muted);font-size:11px;letter-spacing:.08em;text-transform:uppercase">
+        Avanzado: exportar en bloque con FFmpeg</summary>
+      <div class="fila-form" style="margin-top:8px">
+        <div class="campo">
+          <label>Modo de corte</label>
+          <select id="modoCorte" ${esLocal?'':'disabled'}>
+            <option value="copy">Rápido (puede desplazarse ±1-2s)</option>
+            <option value="exacto">Exacto (recodifica, más lento)</option>
+          </select>
+        </div>
+        <button class="btn" onclick="exportarClipsFFmpeg('bat')" ${esLocal?'':'disabled'}>Script .bat (Windows)</button>
+        <button class="btn" onclick="exportarClipsFFmpeg('sh')" ${esLocal?'':'disabled'}>Script .sh (Mac/Linux)</button>
+      </div>
+      <p style="color:var(--muted);font-size:11px;margin-top:6px">Genera todos los clips de golpe en segundos,
+        pero necesita FFmpeg instalado y ejecutar el script manualmente.</p>
+    </details>
     <table class="tabla"><thead><tr><th></th><th>Min</th><th>Categoría</th><th>Equipo</th><th>Jugador</th>
      <th>Resultado</th><th>Clip</th><th></th></tr></thead><tbody>${filas}</tbody></table>`);
 }
@@ -896,6 +923,15 @@ function limpiarNombre(s){
     .replace(/[^a-zA-Z0-9]+/g,'_').replace(/^_+|_+$/g,'') || 'x';
 }
 
+function nombreClip(ev,indice){
+  const cat=CATEGORIAS.find(c=>c.id===ev.tipo);
+  const j=buscarJugador(ev.jugadorRef);
+  const partes=[String(indice).padStart(3,'0'), cat?cat.id:ev.tipo, ev.equipo,
+    j?('d'+limpiarNombre(j.dorsal)):null, ev.resultado?limpiarNombre(ev.resultado):null,
+    tc(ev.t_in).replace(':','-')];
+  return partes.filter(Boolean).join('_');
+}
+
 function exportarClipsFFmpeg(formato){
   if(Reproductor.tipo!=='local'){
     toast('Carga el vídeo local del partido para poder exportar clips.');
@@ -911,13 +947,8 @@ function exportarClipsFFmpeg(formato){
   const refVar = formato==='bat' ? '%VIDEO%' : '$VIDEO';
 
   const lineas = eventos.map((ev,i)=>{
-    const cat=CATEGORIAS.find(c=>c.id===ev.tipo);
-    const j=buscarJugador(ev.jugadorRef);
     const dur = Math.max(0.1, ev.t_out-ev.t_in);
-    const partes = [String(i+1).padStart(3,'0'), cat?cat.id:ev.tipo, ev.equipo,
-      j?('d'+limpiarNombre(j.dorsal)):null, ev.resultado?limpiarNombre(ev.resultado):null,
-      tc(ev.t_in).replace(':','-')];
-    const archivo = partes.filter(Boolean).join('_')+'.mp4';
+    const archivo = nombreClip(ev,i+1)+'.mp4';
     const codec = modoExacto
       ? '-c:v libx264 -preset fast -crf 18 -c:a aac -b:a 192k'
       : '-c copy';
@@ -967,6 +998,127 @@ function exportarClipsFFmpeg(formato){
   a.download='exportar_clips_'+limpiarNombre(estado.partido.equipoRival||'partido')+'.'+ext;
   a.click();
   toast('Script generado · '+eventos.length+' clips. Ejecútalo junto al vídeo del partido.');
+}
+
+/* =====================================================================
+   DESCARGA DIRECTA DE CLIPS (sin FFmpeg, sin instalar nada)
+   El propio navegador reproduce el tramo del vídeo local y lo graba con
+   MediaRecorder; al terminar, descarga el archivo. Como graba en tiempo
+   real, un clip de 10s tarda ~10s. Es la opción recomendada para
+   entrenadores que no van a instalar ni ejecutar nada técnico.
+   ===================================================================== */
+
+let cancelarExport=false;
+
+function soportaDescargaDirecta(){
+  const v=document.getElementById('vidLocal');
+  return !!(window.MediaRecorder && (v.captureStream || v.mozCaptureStream));
+}
+
+function elegirMimeClip(){
+  const candidatos=[
+    'video/mp4;codecs=avc1.42E01E,mp4a.40.2','video/mp4',
+    'video/webm;codecs=vp9,opus','video/webm;codecs=vp8,opus','video/webm'
+  ];
+  return candidatos.find(m=>window.MediaRecorder && MediaRecorder.isTypeSupported(m)) || '';
+}
+
+function esperarSeek(video){
+  return new Promise(res=>{
+    const h=()=>{ video.removeEventListener('seeked',h); res(); };
+    video.addEventListener('seeked',h);
+  });
+}
+
+async function capturarClip(ev){
+  const video=document.getElementById('vidLocal');
+  const velocidadPrevia=video.playbackRate;
+  video.pause();
+  video.playbackRate=1;
+  video.currentTime=ev.t_in;
+  await esperarSeek(video);
+
+  const stream = video.captureStream ? video.captureStream() : video.mozCaptureStream();
+  const mime = elegirMimeClip();
+  const rec = new MediaRecorder(stream, mime? {mimeType:mime} : undefined);
+  const trozos=[];
+  rec.ondataavailable=e=>{ if(e.data && e.data.size) trozos.push(e.data); };
+  const terminado=new Promise((res,rej)=>{ rec.onstop=res; rec.onerror=rej; });
+
+  rec.start();
+  await video.play();
+  await new Promise(res=>{
+    const paso=()=>{
+      if(cancelarExport || video.currentTime>=ev.t_out || video.ended){ res(); return; }
+      requestAnimationFrame(paso);
+    };
+    paso();
+  });
+  video.pause();
+  rec.stop();
+  await terminado;
+  video.playbackRate=velocidadPrevia;
+
+  return {blob:new Blob(trozos,{type:mime||'video/webm'}), ext: mime.includes('mp4')?'mp4':'webm'};
+}
+
+function abrirExportOverlay(){ document.getElementById('modalExport').classList.add('abierto'); }
+function cerrarExportOverlay(){ document.getElementById('modalExport').classList.remove('abierto'); }
+function actualizarExportOverlay(actual,total,ev){
+  const cat=CATEGORIAS.find(c=>c.id===ev.tipo);
+  document.getElementById('expTitulo').textContent='Exportando clip '+actual+' de '+total+' · '+(cat?cat.nom:ev.tipo);
+  document.getElementById('expBarra').max=total;
+  document.getElementById('expBarra').value=actual-1;
+}
+
+async function descargarClipUnico(id){
+  const ev=estado.eventos.find(e=>e.id===id);
+  if(!ev) return;
+  if(Reproductor.tipo!=='local'){ toast('Carga el vídeo local del partido.'); return; }
+  if(!soportaDescargaDirecta()){ toast('Tu navegador no soporta la descarga directa. Usa Chrome o Edge actualizados, o el script FFmpeg.'); return; }
+  cancelarExport=false;
+  cerrarModal();
+  abrirExportOverlay();
+  actualizarExportOverlay(1,1,ev);
+  try{
+    const {blob,ext}=await capturarClip(ev);
+    const a=document.createElement('a');
+    a.href=URL.createObjectURL(blob);
+    a.download=nombreClip(ev,1)+'.'+ext;
+    a.click();
+    toast('Clip descargado.');
+  }catch(err){ toast('No se pudo grabar el clip: '+err.message); }
+  cerrarExportOverlay();
+}
+
+async function descargarClipsDirecto(){
+  if(Reproductor.tipo!=='local'){ toast('Carga el vídeo local del partido.'); return; }
+  if(!soportaDescargaDirecta()){ toast('Tu navegador no soporta la descarga directa. Usa Chrome o Edge actualizados, o el script FFmpeg.'); return; }
+  const ids=Array.from(document.querySelectorAll('.chk-export:checked')).map(c=>c.dataset.id);
+  if(!ids.length){ toast('No has marcado ningún evento para exportar.'); return; }
+  const eventos=estado.eventos.filter(e=>ids.includes(e.id)).sort((a,b)=>a.t_in-b.t_in);
+
+  cancelarExport=false;
+  cerrarModal();
+  abrirExportOverlay();
+  let hechos=0;
+  for(let i=0;i<eventos.length;i++){
+    if(cancelarExport) break;
+    actualizarExportOverlay(i+1, eventos.length, eventos[i]);
+    try{
+      const {blob,ext}=await capturarClip(eventos[i]);
+      const a=document.createElement('a');
+      a.href=URL.createObjectURL(blob);
+      a.download=nombreClip(eventos[i],i+1)+'.'+ext;
+      a.click();
+      hechos++;
+      await new Promise(r=>setTimeout(r,400)); // deja que el navegador procese la descarga anterior
+    }catch(err){
+      toast('Error en un clip, sigo con el siguiente: '+err.message);
+    }
+  }
+  cerrarExportOverlay();
+  toast(cancelarExport? 'Exportación cancelada · '+hechos+' clips descargados.' : 'Listo · '+hechos+' clips descargados.');
 }
 
 function abrirAyuda(){
@@ -1074,6 +1226,7 @@ document.getElementById('btnExport').onclick=exportarJSON;
 document.getElementById('btnImport').onclick=()=>document.getElementById('ficheroJson').click();
 document.getElementById('modalCerrar').onclick=cerrarModal;
 document.getElementById('modal').onclick=e=>{ if(e.target.id==='modal') cerrarModal(); };
+document.getElementById('expCancelar').onclick=()=>{ cancelarExport=true; };
 
 document.getElementById('ficheroJson').onchange=e=>{
   const f=e.target.files[0]; if(!f) return;
@@ -1106,6 +1259,7 @@ document.getElementById('tlScroll').onclick=e=>{
 // teclado
 document.addEventListener('keydown',e=>{
   if(/INPUT|SELECT|TEXTAREA/.test(e.target.tagName)) return;
+  if(document.getElementById('modalExport').classList.contains('abierto')) return;
   if(e.key==='Escape'){ cerrarModal(); return; }
   if(document.getElementById('modal').classList.contains('abierto')) return;
 
