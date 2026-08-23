@@ -229,6 +229,7 @@ input:focus,select:focus,button:focus-visible{outline:2px solid var(--rojo);outl
   <button class="btn" id="btnPartido">Partido</button>
   <button class="btn" id="btnPlantillas">Plantillas</button>
   <button class="btn" id="btnEventos">Eventos <span id="numEv">0</span></button>
+  <button class="btn" id="btnStats">Estadísticas</button>
   <button class="btn" id="btnAyuda">Atajos</button>
   <button class="btn" id="btnExport">Exportar</button>
   <button class="btn btn-rojo" id="btnImport">Importar</button>
@@ -341,18 +342,18 @@ input:focus,select:focus,button:focus-visible{outline:2px solid var(--rojo);outl
    ===================================================================== */
 
 const CATEGORIAS = [
-  {id:'gol',      nom:'Gol',            tecla:'1', color:'#D8232A', pre:8, post:4, resultados:[]},
-  {id:'tiro',     nom:'Tiro',           tecla:'2', color:'#E8703A', pre:6, post:3,
+  {id:'gol',      nom:'Gol',            corto:'Gol',    tecla:'1', color:'#D8232A', pre:8, post:4, resultados:[]},
+  {id:'tiro',     nom:'Tiro',           corto:'Tiro',   tecla:'2', color:'#E8703A', pre:6, post:3,
    resultados:['A puerta','Fuera','Bloqueado','Al palo']},
-  {id:'parada',   nom:'Parada',         tecla:'3', color:'#3FB27F', pre:6, post:3, resultados:[]},
-  {id:'robo',     nom:'Robo',           tecla:'4', color:'#2E9BB7', pre:5, post:5, resultados:[]},
-  {id:'perdida',  nom:'Pérdida',        tecla:'5', color:'#9B59B6', pre:5, post:5, resultados:[]},
-  {id:'falta',    nom:'Falta',          tecla:'6', color:'#E0A32E', pre:5, post:3, resultados:['Cometida','Recibida']},
-  {id:'abp',      nom:'ABP',            tecla:'7', color:'#5D7DD6', pre:6, post:6,
+  {id:'parada',   nom:'Parada',         corto:'Parada', tecla:'3', color:'#3FB27F', pre:6, post:3, resultados:[]},
+  {id:'robo',     nom:'Robo',           corto:'Robo',   tecla:'4', color:'#2E9BB7', pre:5, post:5, resultados:[]},
+  {id:'perdida',  nom:'Pérdida',        corto:'Pérd.',  tecla:'5', color:'#9B59B6', pre:5, post:5, resultados:[]},
+  {id:'falta',    nom:'Falta',          corto:'Falta',  tecla:'6', color:'#E0A32E', pre:5, post:3, resultados:['Cometida','Recibida']},
+  {id:'abp',      nom:'ABP',            corto:'ABP',    tecla:'7', color:'#5D7DD6', pre:6, post:6,
    resultados:['Córner','Banda','Falta','Doble penalti','Penalti']},
-  {id:'1x1',      nom:'1×1',            tecla:'8', color:'#C86FA8', pre:5, post:4, resultados:['Superado','Fallado']},
-  {id:'pj',       nom:'Portero-jugador',tecla:'9', color:'#7E8CA0', pre:10,post:6, resultados:['A favor','En contra']},
-  {id:'transicion',nom:'Transición',    tecla:'0', color:'#48A868', pre:7, post:6, resultados:[]}
+  {id:'1x1',      nom:'1×1',            corto:'1×1',    tecla:'8', color:'#C86FA8', pre:5, post:4, resultados:['Superado','Fallado']},
+  {id:'pj',       nom:'Portero-jugador',corto:'P-J',    tecla:'9', color:'#7E8CA0', pre:10,post:6, resultados:['A favor','En contra']},
+  {id:'transicion',nom:'Transición',    corto:'Trans.', tecla:'0', color:'#48A868', pre:7, post:6, resultados:[]}
 ];
 
 const estado = {
@@ -1121,6 +1122,135 @@ async function descargarClipsDirecto(){
   toast(cancelarExport? 'Exportación cancelada · '+hechos+' clips descargados.' : 'Listo · '+hechos+' clips descargados.');
 }
 
+/* =====================================================================
+   ESTADÍSTICAS
+   Nunca se guardan agregados: todo se recalcula sobre estado.eventos
+   cada vez que se abre o se cambia el filtro de periodo.
+   ===================================================================== */
+
+function statsPorCategoria(eventos){
+  const out={};
+  CATEGORIAS.forEach(c=>out[c.id]={total:0, resultados:{}});
+  eventos.forEach(ev=>{
+    const c=out[ev.tipo]; if(!c) return;
+    c.total++;
+    if(ev.resultado) c.resultados[ev.resultado]=(c.resultados[ev.resultado]||0)+1;
+  });
+  return out;
+}
+function desgloseTexto(stat){
+  return Object.entries(stat.resultados).map(([k,v])=>k+': '+v).join(' · ');
+}
+function eventosPorParte(eventos,parte){
+  return parte==='todo'? eventos : eventos.filter(e=>e.parte===Number(parte));
+}
+function agruparPorJugador(eventos){
+  const grupos=new Map();
+  eventos.forEach(ev=>{
+    const key = ev.jugadorRef? ev.jugadorRef.tipo+':'+ev.jugadorRef.id : 'sinasignar:'+ev.equipo;
+    if(!grupos.has(key)) grupos.set(key,{jugadorRef:ev.jugadorRef, equipo:ev.equipo, eventos:[]});
+    grupos.get(key).eventos.push(ev);
+  });
+  return grupos;
+}
+function nombreGrupo(g){
+  if(!g.jugadorRef) return 'Sin asignar ('+(g.equipo==='propio'?'propio':'rival')+')';
+  const j=buscarJugador(g.jugadorRef);
+  return j? '#'+j.dorsal+(j.nombre?' '+j.nombre:'') : '#?';
+}
+
+function abrirEstadisticas(){
+  if(!estado.eventos.length){
+    modal('Estadísticas', '<div class="vacio">Todavía no has marcado nada.<br>'+
+      'Carga un vídeo y pulsa las teclas 1–0 mientras lo ves.</div>');
+    return;
+  }
+  renderEstadisticas('todo');
+}
+
+function renderEstadisticas(parte){
+  const eventos = eventosPorParte(estado.eventos, parte);
+  const propio = eventos.filter(e=>e.equipo==='propio');
+  const rival = eventos.filter(e=>e.equipo==='rival');
+  const stP = statsPorCategoria(propio), stR = statsPorCategoria(rival);
+  const nomPropio = estado.partido.equipoPropio||'Propio', nomRival = estado.partido.equipoRival||'Rival';
+
+  const filasEquipo = CATEGORIAS.map(c=>{
+    const dp=stP[c.id], dr=stR[c.id];
+    return `<tr>
+      <td><span class="pill" style="background:${c.color}22;color:${c.color}">${c.nom}</span></td>
+      <td class="tc">${dp.total}</td>
+      <td style="color:var(--muted);font-size:10px">${desgloseTexto(dp)}</td>
+      <td class="tc">${dr.total}</td>
+      <td style="color:var(--muted);font-size:10px">${desgloseTexto(dr)}</td>
+    </tr>`;
+  }).join('');
+
+  const grupos = Array.from(agruparPorJugador(eventos).values())
+    .sort((a,b)=>b.eventos.length-a.eventos.length);
+
+  const filasJugadores = grupos.map(g=>{
+    const st = statsPorCategoria(g.eventos);
+    const celdas = CATEGORIAS.map(c=>{
+      const d=st[c.id];
+      const titulo=(desgloseTexto(d)||c.nom).replace(/"/g,'&quot;');
+      return `<td class="tc" title="${titulo}">${d.total||'—'}</td>`;
+    }).join('');
+    return `<tr><td>${nombreGrupo(g)}</td><td>${g.equipo==='propio'?'Propio':'Rival'}</td>${celdas}
+      <td class="tc" style="color:var(--muted)">${g.eventos.length}</td></tr>`;
+  }).join('');
+
+  const cabecerasCat = CATEGORIAS.map(c=>`<th title="${c.nom}">${c.corto}</th>`).join('');
+
+  modal('Estadísticas · '+(parte==='todo'?'Todo el partido':parte+'ª parte'), `
+    <div class="fila-form" style="margin-bottom:14px">
+      <div class="campo"><label>Periodo</label>
+        <select id="statsParte" onchange="renderEstadisticas(this.value)">
+          <option value="todo" ${parte==='todo'?'selected':''}>Todo el partido</option>
+          <option value="1" ${parte==='1'?'selected':''}>1ª parte</option>
+          <option value="2" ${parte==='2'?'selected':''}>2ª parte</option>
+        </select>
+      </div>
+      <button class="btn" onclick="exportarEstadisticasCSV('${parte}')">Exportar a CSV</button>
+    </div>
+
+    <h3 style="font-size:10px;letter-spacing:.15em;text-transform:uppercase;color:var(--muted);margin-bottom:9px">
+      Equipo · ${nomPropio} vs ${nomRival}</h3>
+    <table class="tabla" style="margin-bottom:20px">
+      <thead><tr><th>Categoría</th><th>${nomPropio}</th><th></th><th>${nomRival}</th><th></th></tr></thead>
+      <tbody>${filasEquipo}</tbody>
+    </table>
+
+    <h3 style="font-size:10px;letter-spacing:.15em;text-transform:uppercase;color:var(--muted);margin-bottom:9px">
+      Por jugador</h3>
+    ${grupos.length? `<div style="overflow-x:auto"><table class="tabla">
+      <thead><tr><th>Jugador</th><th>Equipo</th>${cabecerasCat}<th>Total</th></tr></thead>
+      <tbody>${filasJugadores}</tbody></table></div>`
+    : '<p style="color:var(--muted);font-size:11px">No hay eventos en este periodo.</p>'}
+  `);
+}
+
+function exportarEstadisticasCSV(parte){
+  const eventos = eventosPorParte(estado.eventos, parte);
+  const grupos = Array.from(agruparPorJugador(eventos).values());
+  const filas = [['Jugador','Equipo',...CATEGORIAS.map(c=>c.nom),'Total']];
+  grupos.forEach(g=>{
+    const st = statsPorCategoria(g.eventos);
+    filas.push([nombreGrupo(g), g.equipo==='propio'?'Propio':'Rival',
+      ...CATEGORIAS.map(c=>st[c.id].total), g.eventos.length]);
+  });
+  const csv = filas.map(f=>f.map(v=>{
+    const s=String(v);
+    return /[,"\n]/.test(s)? '"'+s.replace(/"/g,'""')+'"' : s;
+  }).join(',')).join('\r\n');
+  const blob = new Blob(['﻿'+csv],{type:'text/csv;charset=utf-8'});
+  const a=document.createElement('a');
+  a.href=URL.createObjectURL(blob);
+  a.download='estadisticas_'+limpiarNombre(estado.partido.equipoRival||'partido')+'.csv';
+  a.click();
+  toast('Estadísticas exportadas a CSV.');
+}
+
 function abrirAyuda(){
   const cats=CATEGORIAS.map(c=>`<div class="atajo"><kbd>${c.tecla}</kbd> ${c.nom}</div>`).join('');
   modal('Atajos de teclado', `
@@ -1221,6 +1351,7 @@ document.getElementById('btnT0').onclick=()=>{
 document.getElementById('btnPartido').onclick=abrirPartido;
 document.getElementById('btnPlantillas').onclick=abrirPlantillas;
 document.getElementById('btnEventos').onclick=abrirEventos;
+document.getElementById('btnStats').onclick=abrirEstadisticas;
 document.getElementById('btnAyuda').onclick=abrirAyuda;
 document.getElementById('btnExport').onclick=exportarJSON;
 document.getElementById('btnImport').onclick=()=>document.getElementById('ficheroJson').click();
