@@ -1,0 +1,1031 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="referrer" content="strict-origin-when-cross-origin">
+<title>Scouting FS · Marcaje de partido</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@400;500;600;700&family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+:root{
+  --bg:#0E1013;
+  --panel:#171A1F;
+  --panel-2:#1E222A;
+  --line:#2A2F39;
+  --txt:#E6E8EB;
+  --muted:#8A929E;
+  --rojo:#D8232A;
+  --rojo-dim:#8F1A1F;
+  --ok:#3FB27F;
+  --warn:#E0A32E;
+  --radius:6px;
+  --display:'Barlow Condensed',Impact,'Arial Narrow',sans-serif;
+  --body:'Inter',system-ui,-apple-system,sans-serif;
+}
+*{box-sizing:border-box;margin:0;padding:0}
+html,body{height:100%}
+body{
+  background:var(--bg);color:var(--txt);font-family:var(--body);font-size:13px;
+  display:flex;flex-direction:column;overflow:hidden;
+}
+button{font-family:inherit;color:inherit;background:none;border:none;cursor:pointer}
+input,select{font-family:inherit;font-size:13px;background:var(--panel-2);color:var(--txt);
+  border:1px solid var(--line);border-radius:4px;padding:5px 7px}
+input:focus,select:focus,button:focus-visible{outline:2px solid var(--rojo);outline-offset:1px}
+
+/* ---------- BARRA SUPERIOR ---------- */
+.top{
+  display:flex;align-items:center;gap:14px;padding:0 14px;height:52px;
+  background:var(--panel);border-bottom:1px solid var(--line);flex:none;
+}
+.marca{font-family:var(--display);font-size:21px;font-weight:700;letter-spacing:.06em;
+  text-transform:uppercase;white-space:nowrap}
+.marca span{color:var(--rojo)}
+.reloj{
+  font-family:var(--display);font-size:30px;font-weight:600;font-variant-numeric:tabular-nums;
+  letter-spacing:.03em;line-height:1;padding:3px 10px;background:var(--bg);
+  border:1px solid var(--line);border-radius:var(--radius);min-width:104px;text-align:center;
+}
+.reloj small{display:block;font-family:var(--body);font-size:9px;font-weight:500;
+  letter-spacing:.14em;color:var(--muted);text-transform:uppercase;margin-top:2px}
+.top-sep{flex:1}
+.btn{
+  padding:7px 12px;border:1px solid var(--line);border-radius:var(--radius);
+  background:var(--panel-2);font-size:12px;font-weight:500;white-space:nowrap;
+}
+.btn:hover{background:#252A33;border-color:#3A414D}
+.btn-rojo{background:var(--rojo);border-color:var(--rojo)}
+.btn-rojo:hover{background:#E8353C;border-color:#E8353C}
+
+/* ---------- CUERPO ---------- */
+.cuerpo{flex:1;display:grid;grid-template-columns:1fr 306px;min-height:0}
+.izq{display:flex;flex-direction:column;min-width:0;min-height:0}
+.video-zona{
+  flex:1;position:relative;background:#000;display:flex;align-items:center;justify-content:center;
+  min-height:0;overflow:hidden;
+}
+#vidLocal{width:100%;height:100%;object-fit:contain;display:none}
+#ytHost{width:100%;height:100%;display:none}
+#ytHost iframe{width:100%;height:100%}
+
+/* pantalla de carga de fuente */
+.fuente{
+  position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;
+  justify-content:center;gap:18px;background:var(--bg);padding:24px;text-align:center;
+}
+.fuente h2{font-family:var(--display);font-size:26px;font-weight:600;letter-spacing:.04em;
+  text-transform:uppercase}
+.fuente p{color:var(--muted);max-width:420px;line-height:1.5}
+.fuente-fila{display:flex;gap:8px;flex-wrap:wrap;justify-content:center;align-items:center}
+.drop{
+  border:1px dashed var(--line);border-radius:var(--radius);padding:22px 30px;
+  color:var(--muted);transition:border-color .15s,color .15s;cursor:pointer;
+}
+.drop:hover,.drop.activo{border-color:var(--rojo);color:var(--txt)}
+
+/* controles de transporte */
+.transporte{
+  display:flex;align-items:center;gap:6px;padding:8px 12px;background:var(--panel);
+  border-top:1px solid var(--line);flex:none;flex-wrap:wrap;
+}
+.tbtn{
+  padding:6px 9px;border:1px solid var(--line);border-radius:4px;background:var(--panel-2);
+  font-family:var(--display);font-size:14px;font-weight:600;letter-spacing:.04em;min-width:34px;
+}
+.tbtn:hover{background:#252A33}
+.tbtn.on{background:var(--rojo);border-color:var(--rojo)}
+.transporte label{color:var(--muted);font-size:11px;text-transform:uppercase;letter-spacing:.1em}
+
+/* ---------- PANEL DE MARCAJE ---------- */
+.lat{
+  background:var(--panel);border-left:1px solid var(--line);display:flex;flex-direction:column;
+  min-height:0;overflow-y:auto;
+}
+.sec{padding:11px 12px;border-bottom:1px solid var(--line)}
+.sec h3{
+  font-size:10px;font-weight:600;letter-spacing:.15em;text-transform:uppercase;
+  color:var(--muted);margin-bottom:9px;
+}
+.equipo-sw{display:grid;grid-template-columns:1fr 1fr;gap:6px}
+.equipo-sw button{
+  padding:9px;border:1px solid var(--line);border-radius:var(--radius);background:var(--panel-2);
+  font-family:var(--display);font-size:15px;font-weight:600;letter-spacing:.05em;text-transform:uppercase;
+}
+.equipo-sw button.on{background:var(--rojo);border-color:var(--rojo)}
+.equipo-sw button.on.rival{background:#2E6FB7;border-color:#2E6FB7}
+
+.cats{display:grid;grid-template-columns:1fr 1fr;gap:6px}
+.cat{
+  position:relative;padding:11px 8px 9px;border:1px solid var(--line);border-radius:var(--radius);
+  background:var(--panel-2);text-align:left;transition:transform .08s;
+}
+.cat:hover{background:#252A33}
+.cat:active{transform:scale(.97)}
+.cat.flash{background:var(--rojo);border-color:var(--rojo)}
+.cat b{display:block;font-family:var(--display);font-size:15px;font-weight:600;letter-spacing:.03em;
+  text-transform:uppercase;line-height:1.1}
+.cat i{display:block;font-style:normal;font-size:10px;color:var(--muted);margin-top:3px}
+.cat .tecla{
+  position:absolute;top:5px;right:6px;font-family:var(--display);font-size:12px;font-weight:700;
+  color:var(--muted);border:1px solid var(--line);border-radius:3px;padding:0 4px;line-height:15px;
+}
+.cat .franja{position:absolute;left:0;top:0;bottom:0;width:3px;border-radius:var(--radius) 0 0 var(--radius)}
+
+/* asignación rápida */
+.rapida{padding:11px 12px;background:var(--panel-2);border-bottom:1px solid var(--line);display:none}
+.rapida.abierta{display:block}
+.rapida h4{font-family:var(--display);font-size:15px;font-weight:600;text-transform:uppercase;
+  letter-spacing:.04em;margin-bottom:8px}
+.dorsales{display:flex;flex-wrap:wrap;gap:5px;margin-bottom:8px}
+.dorsal{
+  min-width:32px;padding:6px 7px;border:1px solid var(--line);border-radius:4px;background:var(--panel);
+  font-family:var(--display);font-size:15px;font-weight:600;font-variant-numeric:tabular-nums;
+}
+.dorsal:hover{background:var(--rojo);border-color:var(--rojo)}
+.resultados{display:flex;flex-wrap:wrap;gap:5px}
+.res{padding:5px 9px;border:1px solid var(--line);border-radius:4px;background:var(--panel);font-size:11px}
+.res:hover{background:#303641}
+.res.on{background:var(--ok);border-color:var(--ok);color:#08130E}
+
+/* ---------- TIMELINE ---------- */
+.tl{background:var(--panel);border-top:1px solid var(--line);flex:none;display:flex;flex-direction:column}
+.tl-cab{display:flex;align-items:center;gap:10px;padding:6px 12px;border-bottom:1px solid var(--line)}
+.tl-cab h3{font-family:var(--display);font-size:14px;font-weight:600;letter-spacing:.1em;
+  text-transform:uppercase}
+.tl-cab .cuenta{color:var(--muted);font-size:11px}
+.tl-scroll{overflow-x:auto;overflow-y:hidden;position:relative}
+.tl-lienzo{position:relative;height:calc(var(--carriles) * 22px + 20px);min-width:100%}
+.regla{position:absolute;top:0;left:0;right:0;height:20px;border-bottom:1px solid var(--line)}
+.tick{position:absolute;top:0;height:20px;border-left:1px solid var(--line);
+  font-size:9px;color:var(--muted);padding-left:3px;line-height:20px;font-variant-numeric:tabular-nums}
+.carril{position:absolute;left:0;right:0;height:22px;border-bottom:1px solid rgba(42,47,57,.5)}
+.carril-nom{
+  position:sticky;left:0;z-index:3;display:inline-block;padding:0 6px;height:22px;line-height:22px;
+  font-size:9px;letter-spacing:.08em;text-transform:uppercase;color:var(--muted);
+  background:linear-gradient(90deg,var(--panel) 78%,transparent);pointer-events:none;
+}
+.ev{
+  position:absolute;height:14px;top:4px;border-radius:2px;min-width:4px;cursor:pointer;
+  border:1px solid rgba(0,0,0,.35);
+}
+.ev:hover{filter:brightness(1.35)}
+.ev.sel{outline:2px solid #fff;outline-offset:1px}
+.cabezal{position:absolute;top:0;bottom:0;width:2px;background:var(--rojo);pointer-events:none;z-index:4}
+.cabezal::before{content:'';position:absolute;top:0;left:-4px;border-left:5px solid transparent;
+  border-right:5px solid transparent;border-top:7px solid var(--rojo)}
+
+/* ---------- MODAL ---------- */
+.modal{position:fixed;inset:0;background:rgba(8,9,11,.82);display:none;align-items:center;
+  justify-content:center;z-index:50;padding:20px}
+.modal.abierto{display:flex}
+.caja{background:var(--panel);border:1px solid var(--line);border-radius:8px;width:min(760px,100%);
+  max-height:86vh;display:flex;flex-direction:column}
+.caja-cab{display:flex;align-items:center;justify-content:space-between;padding:13px 16px;
+  border-bottom:1px solid var(--line)}
+.caja-cab h2{font-family:var(--display);font-size:19px;font-weight:600;letter-spacing:.05em;
+  text-transform:uppercase}
+.caja-cuerpo{padding:16px;overflow-y:auto}
+.tabla{width:100%;border-collapse:collapse;font-size:12px}
+.tabla th{text-align:left;font-size:9px;letter-spacing:.12em;text-transform:uppercase;
+  color:var(--muted);padding:6px 8px;border-bottom:1px solid var(--line);font-weight:600}
+.tabla td{padding:5px 8px;border-bottom:1px solid rgba(42,47,57,.5);vertical-align:middle}
+.tabla tr:hover td{background:var(--panel-2)}
+.pill{display:inline-block;padding:2px 7px;border-radius:20px;font-size:10px;font-weight:600;
+  letter-spacing:.04em;text-transform:uppercase}
+.tc{font-variant-numeric:tabular-nums;font-family:var(--display);font-size:14px;letter-spacing:.03em}
+.vacio{padding:34px 10px;text-align:center;color:var(--muted);line-height:1.6}
+.fila-form{display:flex;gap:8px;align-items:flex-end;flex-wrap:wrap;margin-bottom:14px}
+.campo{display:flex;flex-direction:column;gap:4px}
+.campo label{font-size:9px;letter-spacing:.12em;text-transform:uppercase;color:var(--muted)}
+.aviso{background:rgba(224,163,46,.1);border:1px solid rgba(224,163,46,.35);border-radius:var(--radius);
+  padding:9px 11px;font-size:11px;color:#F0CE8C;line-height:1.5;margin-bottom:12px}
+.toast{
+  position:fixed;bottom:16px;left:50%;transform:translateX(-50%);background:var(--panel-2);
+  border:1px solid var(--line);border-left:3px solid var(--rojo);border-radius:var(--radius);
+  padding:9px 15px;font-size:12px;z-index:99;opacity:0;transition:opacity .2s;pointer-events:none;
+}
+.toast.ver{opacity:1}
+.atajos{display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:7px}
+.atajo{display:flex;gap:8px;align-items:baseline;font-size:11px;color:var(--muted)}
+.atajo kbd{font-family:var(--display);font-size:12px;font-weight:600;background:var(--panel-2);
+  border:1px solid var(--line);border-radius:3px;padding:1px 6px;color:var(--txt)}
+@media(max-width:900px){
+  .cuerpo{grid-template-columns:1fr;grid-template-rows:1fr auto}
+  .lat{border-left:none;border-top:1px solid var(--line);max-height:44vh}
+}
+@media(prefers-reduced-motion:reduce){*{transition:none!important;animation:none!important}}
+</style>
+</head>
+<body>
+
+<div class="top">
+  <div class="marca">Scouting<span>·</span>FS</div>
+  <div class="reloj" id="reloj">00:00<small id="relojEtq">vídeo</small></div>
+  <button class="btn" id="btnParte">1ª parte</button>
+  <button class="btn" id="btnT0" title="Marca el saque inicial de la parte actual en este punto del vídeo">Fijar saque inicial</button>
+  <div class="top-sep"></div>
+  <button class="btn" id="btnPartido">Partido</button>
+  <button class="btn" id="btnPlantillas">Plantillas</button>
+  <button class="btn" id="btnEventos">Eventos <span id="numEv">0</span></button>
+  <button class="btn" id="btnAyuda">Atajos</button>
+  <button class="btn" id="btnExport">Exportar</button>
+  <button class="btn btn-rojo" id="btnImport">Importar</button>
+</div>
+
+<div class="cuerpo">
+  <div class="izq">
+    <div class="video-zona" id="videoZona">
+      <video id="vidLocal" playsinline></video>
+      <div id="ytHost"></div>
+      <div class="fuente" id="fuente">
+        <h2>Carga el partido</h2>
+        <p>Trabaja con un archivo local si vas a exportar clips, o con YouTube si solo vas a marcar estadísticas.</p>
+        <div class="drop" id="drop">Arrastra el vídeo aquí o pulsa para elegir archivo</div>
+        <div class="fuente-fila">
+          <input type="text" id="ytUrl" placeholder="…o pega una URL de YouTube" style="width:290px">
+          <button class="btn" id="btnYt">Cargar de YouTube</button>
+        </div>
+      </div>
+    </div>
+
+    <div class="transporte">
+      <button class="tbtn" id="btnPlay">▶</button>
+      <button class="tbtn" data-salto="-5">−5s</button>
+      <button class="tbtn" data-salto="-1">−1s</button>
+      <button class="tbtn" data-salto="1">+1s</button>
+      <button class="tbtn" data-salto="5">+5s</button>
+      <button class="tbtn" id="btnFrameA" title="Fotograma anterior (solo archivo local)">◀|</button>
+      <button class="tbtn" id="btnFrameD" title="Fotograma siguiente (solo archivo local)">|▶</button>
+      <label style="margin-left:8px">Velocidad</label>
+      <select id="velocidad" style="width:74px">
+        <option value="0.25">0.25×</option><option value="0.5">0.5×</option>
+        <option value="1" selected>1×</option><option value="1.5">1.5×</option>
+        <option value="2">2×</option>
+      </select>
+      <label style="margin-left:8px">Zoom</label>
+      <select id="zoom" style="width:74px">
+        <option value="1">1 px/s</option><option value="2">2 px/s</option>
+        <option value="4" selected>4 px/s</option><option value="8">8 px/s</option>
+        <option value="16">16 px/s</option>
+      </select>
+      <span style="flex:1"></span>
+      <span id="estadoFuente" style="color:var(--muted);font-size:11px"></span>
+    </div>
+
+    <div class="tl">
+      <div class="tl-cab">
+        <h3>Línea de tiempo</h3>
+        <span class="cuenta" id="tlInfo">Sin eventos</span>
+        <span style="flex:1"></span>
+        <button class="btn" id="btnBorrarSel" style="display:none">Borrar seleccionado</button>
+      </div>
+      <div class="tl-scroll" id="tlScroll">
+        <div class="tl-lienzo" id="tlLienzo">
+          <div class="regla" id="regla"></div>
+          <div class="cabezal" id="cabezal" style="left:0"></div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="lat">
+    <div class="sec">
+      <h3>Equipo que marco</h3>
+      <div class="equipo-sw">
+        <button id="eqPropio" class="on">Propio</button>
+        <button id="eqRival" class="rival">Rival</button>
+      </div>
+    </div>
+    <div class="rapida" id="rapida">
+      <h4 id="rapidaTitulo">Asignar</h4>
+      <div class="dorsales" id="rapidaDorsales"></div>
+      <div class="resultados" id="rapidaResultados"></div>
+    </div>
+    <div class="sec" style="flex:1">
+      <h3>Categorías</h3>
+      <div class="cats" id="cats"></div>
+    </div>
+  </div>
+</div>
+
+<!-- MODALES -->
+<div class="modal" id="modal">
+  <div class="caja">
+    <div class="caja-cab"><h2 id="modalTitulo"></h2><button class="btn" id="modalCerrar">Cerrar</button></div>
+    <div class="caja-cuerpo" id="modalCuerpo"></div>
+  </div>
+</div>
+
+<input type="file" id="ficheroVideo" accept="video/*" style="display:none">
+<input type="file" id="ficheroJson" accept="application/json,.json" style="display:none">
+<div class="toast" id="toast"></div>
+
+<script>
+/* =====================================================================
+   MODELO DE DATOS
+   Todo se deriva de la lista de eventos. Nunca se guardan agregados.
+   ===================================================================== */
+
+const CATEGORIAS = [
+  {id:'gol',      nom:'Gol',            tecla:'1', color:'#D8232A', pre:8, post:4, resultados:[]},
+  {id:'tiro',     nom:'Tiro',           tecla:'2', color:'#E8703A', pre:6, post:3,
+   resultados:['A puerta','Fuera','Bloqueado','Al palo']},
+  {id:'parada',   nom:'Parada',         tecla:'3', color:'#3FB27F', pre:6, post:3, resultados:[]},
+  {id:'robo',     nom:'Robo',           tecla:'4', color:'#2E9BB7', pre:5, post:5, resultados:[]},
+  {id:'perdida',  nom:'Pérdida',        tecla:'5', color:'#9B59B6', pre:5, post:5, resultados:[]},
+  {id:'falta',    nom:'Falta',          tecla:'6', color:'#E0A32E', pre:5, post:3, resultados:['Cometida','Recibida']},
+  {id:'abp',      nom:'ABP',            tecla:'7', color:'#5D7DD6', pre:6, post:6,
+   resultados:['Córner','Banda','Falta','Doble penalti','Penalti']},
+  {id:'1x1',      nom:'1×1',            tecla:'8', color:'#C86FA8', pre:5, post:4, resultados:['Superado','Fallado']},
+  {id:'pj',       nom:'Portero-jugador',tecla:'9', color:'#7E8CA0', pre:10,post:6, resultados:['A favor','En contra']},
+  {id:'transicion',nom:'Transición',    tecla:'0', color:'#48A868', pre:7, post:6, resultados:[]}
+];
+
+const estado = {
+  partido:{
+    id:'p_'+Date.now(),
+    vinculado:false,          // ← futuro: enlace con un partido de Sporting
+    partidoSportingId:null,
+    equipoPropio:'CD Sporting FS Almería',
+    equipoRival:'Rival',
+    fecha:new Date().toISOString().slice(0,10),
+    competicion:'',
+    esRivalFuturo:false,
+    fuenteVideo:null,          // 'local' | 'youtube'
+    refVideo:'',               // nombre de archivo o id de YouTube
+    t0:{1:null,2:null}         // segundo de vídeo en el que empieza cada parte
+  },
+  plantillaPropia:[],          // ← futuro: se cargará de la colección `plantilla` de Sporting
+  plantillaRival:[],           // vive dentro del partido mientras el rival no se repita
+  eventos:[],
+  equipoActivo:'propio',
+  parte:1,
+  pxs:4,
+  seleccion:null,
+  pendiente:null               // evento a la espera de asignación rápida
+};
+
+/* =====================================================================
+   CAPA DE REPRODUCTOR (unifica archivo local y YouTube)
+   El resto del código solo habla con Reproductor, nunca con <video>
+   ni con la API de YouTube directamente.
+   ===================================================================== */
+
+const Reproductor = {
+  tipo:null, vid:null, yt:null, ytListo:false,
+  _ytT:0, _ytStamp:0, _ytPlay:false,
+
+  cargarLocal(file){
+    const v = document.getElementById('vidLocal');
+    v.src = URL.createObjectURL(file);
+    v.style.display='block';
+    document.getElementById('ytHost').style.display='none';
+    document.getElementById('fuente').style.display='none';
+    this.tipo='local'; this.vid=v; this.yt=null;
+    estado.partido.fuenteVideo='local';
+    estado.partido.refVideo=file.name;
+    document.getElementById('estadoFuente').textContent='Archivo local · '+file.name;
+    v.onloadedmetadata=()=>{ pintarTimeline(); };
+    toast('Vídeo cargado. Puedes marcar y exportar clips.');
+    guardar();
+  },
+
+  cargarYoutube(url){
+    const id = extraerIdYT(url);
+    if(!id){ toast('No reconozco esa URL de YouTube.'); return; }
+    document.getElementById('vidLocal').style.display='none';
+    document.getElementById('ytHost').style.display='block';
+    document.getElementById('fuente').style.display='none';
+    this.tipo='youtube';
+    estado.partido.fuenteVideo='youtube';
+    estado.partido.refVideo=id;
+    document.getElementById('estadoFuente').textContent='YouTube · '+id+' · sin exportación de clips';
+
+    const arranca=()=>{
+      this.yt = new YT.Player('ytHost',{
+        videoId:id,
+        host:'https://www.youtube-nocookie.com',
+        playerVars:{controls:1,rel:0,modestbranding:1,playsinline:1},
+        events:{
+          onError:(e)=>{
+            const codigos={2:'URL de YouTube no válida.',5:'Error del reproductor HTML5.',
+              100:'Vídeo no encontrado, privado o eliminado.',
+              101:'El propietario no permite reproducir este vídeo fuera de YouTube.',
+              150:'El propietario no permite reproducir este vídeo fuera de YouTube.',
+              153:'YouTube ha bloqueado la reproducción por venir de un archivo local (file://). '+
+                'Prueba a servir esta página desde un servidor local (http://) en vez de abrirla como archivo, '+
+                'o desactiva temporalmente el bloqueador de anuncios.'};
+            toast('Error de YouTube: '+(codigos[e.data]||('código '+e.data)));
+          },
+          onReady:()=>{ this.ytListo=true; pintarTimeline(); },
+          onStateChange:(e)=>{
+            this._ytPlay = (e.data===YT.PlayerState.PLAYING);
+            this._ytT=this.yt.getCurrentTime(); this._ytStamp=performance.now();
+            botonPlay();
+          }
+        }
+      });
+    };
+    if(window.YT && window.YT.Player){ arranca(); }
+    else{
+      window.onYouTubeIframeAPIReady=arranca;
+      const s=document.createElement('script');
+      s.src='https://www.youtube.com/iframe_api';
+      document.head.appendChild(s);
+    }
+    toast('YouTube cargado. Marcaje sí, exportación de clips no.');
+    guardar();
+  },
+
+  // getCurrentTime de YouTube solo refresca cada ~250 ms: interpolamos
+  // con performance.now() para que el marcaje no se quede escalonado.
+  tiempo(){
+    if(this.tipo==='local' && this.vid) return this.vid.currentTime||0;
+    if(this.tipo==='youtube' && this.ytListo){
+      const base=this.yt.getCurrentTime()||0;
+      if(base!==this._ytT){ this._ytT=base; this._ytStamp=performance.now(); }
+      if(this._ytPlay){
+        const d=(performance.now()-this._ytStamp)/1000;
+        return this._ytT + Math.min(d,0.4)*(this.velocidad()||1);
+      }
+      return this._ytT;
+    }
+    return 0;
+  },
+  duracion(){
+    if(this.tipo==='local' && this.vid) return this.vid.duration||0;
+    if(this.tipo==='youtube' && this.ytListo) return this.yt.getDuration()||0;
+    return 0;
+  },
+  reproduciendo(){
+    if(this.tipo==='local' && this.vid) return !this.vid.paused;
+    if(this.tipo==='youtube' && this.ytListo) return this._ytPlay;
+    return false;
+  },
+  play(){ if(this.tipo==='local') this.vid.play(); else if(this.ytListo) this.yt.playVideo(); },
+  pausa(){ if(this.tipo==='local') this.vid.pause(); else if(this.ytListo) this.yt.pauseVideo(); },
+  alternar(){ this.reproduciendo()? this.pausa() : this.play(); },
+  ir(t){
+    t=Math.max(0,t);
+    if(this.tipo==='local' && this.vid) this.vid.currentTime=t;
+    else if(this.ytListo){ this.yt.seekTo(t,true); this._ytT=t; this._ytStamp=performance.now(); }
+  },
+  salto(d){ this.ir(this.tiempo()+d); },
+  velocidad(v){
+    if(v===undefined){
+      if(this.tipo==='local'&&this.vid) return this.vid.playbackRate;
+      if(this.ytListo) return this.yt.getPlaybackRate();
+      return 1;
+    }
+    if(this.tipo==='local'&&this.vid) this.vid.playbackRate=v;
+    else if(this.ytListo) this.yt.setPlaybackRate(v);
+  },
+  frame(dir){
+    if(this.tipo!=='local'){ toast('El avance por fotogramas solo funciona con archivo local.'); return; }
+    this.pausa(); this.vid.currentTime += dir*(1/25);
+  }
+};
+
+function extraerIdYT(u){
+  const m = u.match(/(?:youtu\.be\/|v=|embed\/|shorts\/)([A-Za-z0-9_-]{11})/);
+  if(m) return m[1];
+  if(/^[A-Za-z0-9_-]{11}$/.test(u.trim())) return u.trim();
+  return null;
+}
+
+/* =====================================================================
+   MARCAJE
+   ===================================================================== */
+
+function marcar(catId){
+  if(!Reproductor.tipo){ toast('Carga primero un vídeo.'); return; }
+  const cat = CATEGORIAS.find(c=>c.id===catId);
+  const t = Reproductor.tiempo();
+
+  const ev = {
+    id:'e_'+Date.now()+'_'+Math.random().toString(36).slice(2,7),
+    partidoId: estado.partido.id,
+    tipo: cat.id,
+    t_mark: t,
+    t_in: Math.max(0, t-cat.pre),
+    t_out: t+cat.post,
+    equipo: estado.equipoActivo,
+    jugadorRef: null,            // {tipo:'propio'|'rival', id}
+    resultado: null,
+    parte: estado.parte,
+    etiquetas: [],
+    nota: '',
+    creado: new Date().toISOString()
+  };
+  estado.eventos.push(ev);
+  estado.eventos.sort((a,b)=>a.t_mark-b.t_mark);
+
+  parpadeo(cat.id);
+  abrirRapida(ev, cat);
+  pintarTimeline();
+  guardar();
+}
+
+function parpadeo(catId){
+  const b=document.querySelector('.cat[data-cat="'+catId+'"]');
+  if(!b) return;
+  b.classList.add('flash');
+  setTimeout(()=>b.classList.remove('flash'),180);
+}
+
+// Asignación en dos pasos: el vídeo NO se para, se asigna sobre la marcha.
+let tempRapida=null;
+function abrirRapida(ev,cat){
+  estado.pendiente=ev;
+  const caja=document.getElementById('rapida');
+  const plantilla = ev.equipo==='propio'? estado.plantillaPropia : estado.plantillaRival;
+  document.getElementById('rapidaTitulo').textContent =
+    cat.nom+' · '+(ev.equipo==='propio'?'propio':'rival')+' · '+tc(ev.t_mark);
+
+  const cd=document.getElementById('rapidaDorsales');
+  cd.innerHTML='';
+  if(!plantilla.length){
+    cd.innerHTML='<span style="color:var(--muted);font-size:11px">Sin jugadores cargados · '+
+      '<button class="btn" style="padding:3px 7px" onclick="abrirPlantillas()">Añadir</button></span>';
+  }else{
+    plantilla.forEach(j=>{
+      const b=document.createElement('button');
+      b.className='dorsal'; b.textContent=j.dorsal;
+      b.title=j.nombre||('Dorsal '+j.dorsal);
+      b.onclick=()=>{ ev.jugadorRef={tipo:ev.equipo,id:j.id}; pintarTimeline(); guardar();
+        b.style.background='var(--rojo)'; };
+      cd.appendChild(b);
+    });
+  }
+
+  const cr=document.getElementById('rapidaResultados');
+  cr.innerHTML='';
+  cat.resultados.forEach(r=>{
+    const b=document.createElement('button');
+    b.className='res'; b.textContent=r;
+    b.onclick=()=>{
+      ev.resultado=r;
+      cr.querySelectorAll('.res').forEach(x=>x.classList.remove('on'));
+      b.classList.add('on'); guardar();
+    };
+    cr.appendChild(b);
+  });
+
+  caja.classList.add('abierta');
+  clearTimeout(tempRapida);
+  tempRapida=setTimeout(()=>{ caja.classList.remove('abierta'); estado.pendiente=null; },12000);
+}
+
+/* =====================================================================
+   TIMELINE
+   ===================================================================== */
+
+function pintarTimeline(){
+  const lienzo=document.getElementById('tlLienzo');
+  const dur=Reproductor.duracion()||600;
+  const pxs=estado.pxs;
+  const ancho=Math.max(dur*pxs, 400);
+
+  lienzo.style.setProperty('--carriles', CATEGORIAS.length);
+  lienzo.style.width=ancho+'px';
+
+  lienzo.querySelectorAll('.carril,.ev,.tick').forEach(n=>n.remove());
+
+  // regla temporal
+  const regla=document.getElementById('regla');
+  const paso = pxs>=8?30 : pxs>=4?60 : pxs>=2?120 : 300;
+  for(let s=0;s<=dur;s+=paso){
+    const d=document.createElement('div');
+    d.className='tick'; d.style.left=(s*pxs)+'px'; d.textContent=tc(s);
+    regla.appendChild(d);
+  }
+
+  // carriles por categoría
+  CATEGORIAS.forEach((cat,i)=>{
+    const c=document.createElement('div');
+    c.className='carril'; c.style.top=(20+i*22)+'px';
+    const n=document.createElement('span');
+    n.className='carril-nom'; n.textContent=cat.nom;
+    c.appendChild(n);
+    lienzo.appendChild(c);
+  });
+
+  // eventos
+  estado.eventos.forEach(ev=>{
+    const i=CATEGORIAS.findIndex(c=>c.id===ev.tipo);
+    if(i<0) return;
+    const cat=CATEGORIAS[i];
+    const d=document.createElement('div');
+    d.className='ev'+(estado.seleccion===ev.id?' sel':'');
+    d.style.left=(ev.t_in*pxs)+'px';
+    d.style.width=Math.max(4,(ev.t_out-ev.t_in)*pxs)+'px';
+    d.style.top=(20+i*22+4)+'px';
+    d.style.background=cat.color;
+    d.style.opacity = ev.equipo==='rival'? .55 : 1;
+    d.title=etiquetaEvento(ev);
+    d.onclick=(e)=>{ e.stopPropagation(); seleccionar(ev.id); Reproductor.ir(ev.t_in); Reproductor.play(); };
+    lienzo.appendChild(d);
+  });
+
+  document.getElementById('numEv').textContent=estado.eventos.length;
+  document.getElementById('tlInfo').textContent =
+    estado.eventos.length? estado.eventos.length+' eventos marcados' : 'Sin eventos';
+}
+
+function seleccionar(id){
+  estado.seleccion=id;
+  document.getElementById('btnBorrarSel').style.display = id?'inline-block':'none';
+  pintarTimeline();
+}
+
+function etiquetaEvento(ev){
+  const cat=CATEGORIAS.find(c=>c.id===ev.tipo);
+  const j=buscarJugador(ev.jugadorRef);
+  return [tc(ev.t_mark), cat?cat.nom:ev.tipo, ev.equipo==='propio'?'propio':'rival',
+          j?('#'+j.dorsal+(j.nombre?' '+j.nombre:'')):'', ev.resultado||''].filter(Boolean).join(' · ');
+}
+
+function buscarJugador(ref){
+  if(!ref) return null;
+  const lista = ref.tipo==='propio'? estado.plantillaPropia : estado.plantillaRival;
+  return lista.find(j=>j.id===ref.id)||null;
+}
+
+/* cabezal + reloj a 10 fps */
+setInterval(()=>{
+  if(!Reproductor.tipo) return;
+  const t=Reproductor.tiempo();
+  document.getElementById('cabezal').style.left=(t*estado.pxs)+'px';
+
+  const t0=estado.partido.t0[estado.parte];
+  if(t0!==null && t>=t0){
+    document.getElementById('reloj').firstChild.textContent=tc(t-t0);
+    document.getElementById('relojEtq').textContent=estado.parte+'ª parte';
+  }else{
+    document.getElementById('reloj').firstChild.textContent=tc(t);
+    document.getElementById('relojEtq').textContent='vídeo';
+  }
+
+  // autoscroll de la timeline siguiendo el cabezal
+  const sc=document.getElementById('tlScroll');
+  const x=t*estado.pxs;
+  if(x < sc.scrollLeft+60 || x > sc.scrollLeft+sc.clientWidth-60){
+    sc.scrollLeft = x - sc.clientWidth/2;
+  }
+},100);
+
+function tc(s){
+  s=Math.max(0,s||0);
+  const m=Math.floor(s/60), x=Math.floor(s%60);
+  return String(m).padStart(2,'0')+':'+String(x).padStart(2,'0');
+}
+
+/* =====================================================================
+   PERSISTENCIA LOCAL (IndexedDB, con export/import JSON como respaldo)
+   Cuando toque, esta es la única capa que hay que sustituir por Firestore.
+   ===================================================================== */
+
+let db=null;
+function abrirDB(){
+  return new Promise(res=>{
+    try{
+      const r=indexedDB.open('scoutingfs',1);
+      r.onupgradeneeded=e=>{ e.target.result.createObjectStore('proyectos'); };
+      r.onsuccess=e=>{ db=e.target.result; res(true); };
+      r.onerror=()=>res(false);
+    }catch(e){ res(false); }
+  });
+}
+function guardar(){
+  if(!db) return;
+  try{
+    const datos={partido:estado.partido, plantillaPropia:estado.plantillaPropia,
+      plantillaRival:estado.plantillaRival, eventos:estado.eventos};
+    db.transaction('proyectos','readwrite').objectStore('proyectos').put(datos,'actual');
+  }catch(e){}
+}
+function cargar(){
+  return new Promise(res=>{
+    if(!db) return res(null);
+    try{
+      const r=db.transaction('proyectos','readonly').objectStore('proyectos').get('actual');
+      r.onsuccess=()=>res(r.result||null);
+      r.onerror=()=>res(null);
+    }catch(e){ res(null); }
+  });
+}
+
+function exportarJSON(){
+  const datos={
+    version:1, exportado:new Date().toISOString(),
+    partido:estado.partido, plantillaPropia:estado.plantillaPropia,
+    plantillaRival:estado.plantillaRival, eventos:estado.eventos
+  };
+  const blob=new Blob([JSON.stringify(datos,null,2)],{type:'application/json'});
+  const a=document.createElement('a');
+  a.href=URL.createObjectURL(blob);
+  a.download='scouting_'+(estado.partido.equipoRival||'partido').replace(/\s+/g,'_')+'_'+
+    estado.partido.fecha+'.json';
+  a.click();
+  toast('Proyecto exportado.');
+}
+
+/* =====================================================================
+   MODALES
+   ===================================================================== */
+
+function modal(titulo, html){
+  document.getElementById('modalTitulo').textContent=titulo;
+  document.getElementById('modalCuerpo').innerHTML=html;
+  document.getElementById('modal').classList.add('abierto');
+}
+function cerrarModal(){ document.getElementById('modal').classList.remove('abierto'); }
+
+function abrirPartido(){
+  const p=estado.partido;
+  modal('Datos del partido', `
+    <div class="aviso">Este prototipo trabaja en local. El selector de partidos ya creados en Sporting
+    se añadirá cuando conectemos Firestore; el campo <code>partidoSportingId</code> ya existe en el modelo
+    y se quedará vacío mientras el partido sea independiente.</div>
+    <div class="fila-form">
+      <div class="campo"><label>Equipo propio</label><input id="fPropio" value="${p.equipoPropio}"></div>
+      <div class="campo"><label>Rival</label><input id="fRival" value="${p.equipoRival}"></div>
+      <div class="campo"><label>Fecha</label><input type="date" id="fFecha" value="${p.fecha}"></div>
+    </div>
+    <div class="fila-form">
+      <div class="campo"><label>Competición</label><input id="fComp" value="${p.competicion}"></div>
+      <div class="campo"><label>Tipo de análisis</label>
+        <select id="fTipo">
+          <option value="jugado" ${!p.esRivalFuturo?'selected':''}>Partido jugado</option>
+          <option value="futuro" ${p.esRivalFuturo?'selected':''}>Scouting de rival futuro</option>
+        </select></div>
+      <button class="btn btn-rojo" onclick="guardarPartido()">Guardar</button>
+    </div>
+    <h3 style="font-size:10px;letter-spacing:.15em;text-transform:uppercase;color:var(--muted);margin:16px 0 8px">
+      Saque inicial por parte</h3>
+    <p style="color:var(--muted);font-size:11px;line-height:1.6">
+      Coloca el vídeo en el saque inicial y pulsa <b>Fijar saque inicial</b> en la barra superior.
+      A partir de ahí el reloj muestra el minuto real de partido en vez del minuto de vídeo.<br>
+      1ª parte: <b>${p.t0[1]!==null?tc(p.t0[1]):'sin fijar'}</b> ·
+      2ª parte: <b>${p.t0[2]!==null?tc(p.t0[2]):'sin fijar'}</b>
+    </p>`);
+}
+function guardarPartido(){
+  const p=estado.partido;
+  p.equipoPropio=document.getElementById('fPropio').value;
+  p.equipoRival=document.getElementById('fRival').value;
+  p.fecha=document.getElementById('fFecha').value;
+  p.competicion=document.getElementById('fComp').value;
+  p.esRivalFuturo=document.getElementById('fTipo').value==='futuro';
+  guardar(); cerrarModal(); toast('Partido actualizado.');
+}
+
+function abrirPlantillas(){
+  modal('Plantillas', `
+    <div class="aviso">La plantilla propia se cargará desde la colección <code>plantilla</code> de Sporting
+    cuando conectemos Firestore, con los mismos ids de jugador. Mientras tanto se introduce a mano aquí.
+    La plantilla rival vive dentro de este partido: si el rival se repite, la promocionaremos a una
+    colección propia.</div>
+    ${bloquePlantilla('propio','Plantilla propia')}
+    ${bloquePlantilla('rival','Plantilla rival')}`);
+}
+function bloquePlantilla(tipo,titulo){
+  const lista = tipo==='propio'? estado.plantillaPropia : estado.plantillaRival;
+  return `
+  <h3 style="font-family:var(--display);font-size:16px;text-transform:uppercase;letter-spacing:.05em;
+    margin:14px 0 8px">${titulo}</h3>
+  <div class="fila-form">
+    <div class="campo"><label>Dorsal</label><input id="d_${tipo}" style="width:70px" inputmode="numeric"></div>
+    <div class="campo"><label>Nombre (opcional)</label><input id="n_${tipo}" style="width:200px"></div>
+    <div class="campo"><label>Posición</label>
+      <select id="p_${tipo}"><option>Portero</option><option>Cierre</option><option>Ala</option>
+      <option>Pívot</option><option>Universal</option></select></div>
+    <button class="btn btn-rojo" onclick="anadirJugador('${tipo}')">Añadir</button>
+  </div>
+  ${lista.length? `<table class="tabla"><thead><tr><th>Dorsal</th><th>Nombre</th><th>Posición</th><th></th></tr></thead>
+  <tbody>${lista.map(j=>`<tr><td class="tc">${j.dorsal}</td><td>${j.nombre||'—'}</td>
+  <td>${j.posicion}</td><td style="text-align:right">
+  <button class="btn" style="padding:2px 8px" onclick="borrarJugador('${tipo}','${j.id}')">Quitar</button>
+  </td></tr>`).join('')}</tbody></table>`
+  : `<p style="color:var(--muted);font-size:11px">Todavía no hay jugadores. Con el rival basta el dorsal
+     que veas en el vídeo; el nombre lo puedes completar después.</p>`}`;
+}
+function anadirJugador(tipo){
+  const d=document.getElementById('d_'+tipo).value.trim();
+  if(!d){ toast('Hace falta al menos el dorsal.'); return; }
+  const j={id:'j_'+Date.now()+'_'+Math.random().toString(36).slice(2,6),
+    dorsal:d, nombre:document.getElementById('n_'+tipo).value.trim(),
+    posicion:document.getElementById('p_'+tipo).value};
+  (tipo==='propio'? estado.plantillaPropia : estado.plantillaRival).push(j);
+  guardar(); abrirPlantillas();
+}
+function borrarJugador(tipo,id){
+  const lista = tipo==='propio'? estado.plantillaPropia : estado.plantillaRival;
+  const i=lista.findIndex(j=>j.id===id);
+  if(i>=0) lista.splice(i,1);
+  guardar(); abrirPlantillas();
+}
+
+function abrirEventos(){
+  if(!estado.eventos.length){
+    modal('Eventos', '<div class="vacio">Todavía no has marcado nada.<br>'+
+      'Carga un vídeo y pulsa las teclas 1–0 mientras lo ves.</div>');
+    return;
+  }
+  const filas = estado.eventos.map(ev=>{
+    const cat=CATEGORIAS.find(c=>c.id===ev.tipo);
+    const j=buscarJugador(ev.jugadorRef);
+    return `<tr>
+      <td class="tc">${tc(ev.t_mark)}</td>
+      <td><span class="pill" style="background:${cat.color}22;color:${cat.color}">${cat.nom}</span></td>
+      <td>${ev.equipo==='propio'?'Propio':'Rival'}</td>
+      <td>${j? '#'+j.dorsal+(j.nombre?' '+j.nombre:'') : '<span style="color:var(--muted)">sin asignar</span>'}</td>
+      <td>${ev.resultado||'—'}</td>
+      <td class="tc" style="color:var(--muted)">${tc(ev.t_in)}–${tc(ev.t_out)}</td>
+      <td style="text-align:right;white-space:nowrap">
+        <button class="btn" style="padding:2px 8px" onclick="irA(${ev.t_in})">Ver</button>
+        <button class="btn" style="padding:2px 8px" onclick="borrarEvento('${ev.id}')">Borrar</button>
+      </td></tr>`;
+  }).join('');
+  modal('Eventos · '+estado.eventos.length,
+    `<table class="tabla"><thead><tr><th>Min</th><th>Categoría</th><th>Equipo</th><th>Jugador</th>
+     <th>Resultado</th><th>Clip</th><th></th></tr></thead><tbody>${filas}</tbody></table>`);
+}
+function irA(t){ cerrarModal(); Reproductor.ir(t); Reproductor.play(); }
+function borrarEvento(id){
+  const i=estado.eventos.findIndex(e=>e.id===id);
+  if(i>=0) estado.eventos.splice(i,1);
+  guardar(); pintarTimeline(); abrirEventos();
+}
+
+function abrirAyuda(){
+  const cats=CATEGORIAS.map(c=>`<div class="atajo"><kbd>${c.tecla}</kbd> ${c.nom}</div>`).join('');
+  modal('Atajos de teclado', `
+    <h3 style="font-size:10px;letter-spacing:.15em;text-transform:uppercase;color:var(--muted);margin-bottom:9px">
+      Marcaje</h3>
+    <div class="atajos">${cats}</div>
+    <h3 style="font-size:10px;letter-spacing:.15em;text-transform:uppercase;color:var(--muted);margin:18px 0 9px">
+      Reproducción</h3>
+    <div class="atajos">
+      <div class="atajo"><kbd>Espacio</kbd> Reproducir / pausar</div>
+      <div class="atajo"><kbd>←</kbd> <kbd>→</kbd> ∓1 segundo</div>
+      <div class="atajo"><kbd>Shift</kbd>+<kbd>←→</kbd> ∓5 segundos</div>
+      <div class="atajo"><kbd>,</kbd> <kbd>.</kbd> Fotograma (solo local)</div>
+      <div class="atajo"><kbd>Tab</kbd> Cambiar propio / rival</div>
+      <div class="atajo"><kbd>Esc</kbd> Cerrar ventana</div>
+    </div>
+    <p style="color:var(--muted);font-size:11px;line-height:1.6;margin-top:16px">
+      Cada categoría tiene su propio pre-roll y post-roll: marcas en un instante y el clip se genera
+      desde unos segundos antes hasta unos después, sin tener que parar el vídeo.</p>`);
+}
+
+/* =====================================================================
+   EVENTOS DE INTERFAZ
+   ===================================================================== */
+
+function toast(msg){
+  const t=document.getElementById('toast');
+  t.textContent=msg; t.classList.add('ver');
+  clearTimeout(t._h); t._h=setTimeout(()=>t.classList.remove('ver'),2600);
+}
+function botonPlay(){
+  document.getElementById('btnPlay').textContent = Reproductor.reproduciendo()?'❚❚':'▶';
+}
+
+// panel de categorías
+const cont=document.getElementById('cats');
+CATEGORIAS.forEach(c=>{
+  const b=document.createElement('button');
+  b.className='cat'; b.dataset.cat=c.id;
+  b.innerHTML=`<span class="franja" style="background:${c.color}"></span>
+    <span class="tecla">${c.tecla}</span><b>${c.nom}</b><i>−${c.pre}s / +${c.post}s</i>`;
+  b.onclick=()=>marcar(c.id);
+  cont.appendChild(b);
+});
+
+// fuente de vídeo
+const drop=document.getElementById('drop');
+drop.onclick=()=>document.getElementById('ficheroVideo').click();
+document.getElementById('ficheroVideo').onchange=e=>{
+  if(e.target.files[0]) Reproductor.cargarLocal(e.target.files[0]);
+};
+['dragenter','dragover'].forEach(n=>drop.addEventListener(n,e=>{
+  e.preventDefault(); drop.classList.add('activo');
+}));
+['dragleave','drop'].forEach(n=>drop.addEventListener(n,e=>{
+  e.preventDefault(); drop.classList.remove('activo');
+}));
+drop.addEventListener('drop',e=>{
+  const f=e.dataTransfer.files[0];
+  if(f && f.type.startsWith('video')) Reproductor.cargarLocal(f);
+});
+document.getElementById('btnYt').onclick=()=>{
+  Reproductor.cargarYoutube(document.getElementById('ytUrl').value);
+};
+
+// transporte
+document.getElementById('btnPlay').onclick=()=>{ Reproductor.alternar(); setTimeout(botonPlay,60); };
+document.querySelectorAll('[data-salto]').forEach(b=>{
+  b.onclick=()=>Reproductor.salto(parseFloat(b.dataset.salto));
+});
+document.getElementById('btnFrameA').onclick=()=>Reproductor.frame(-1);
+document.getElementById('btnFrameD').onclick=()=>Reproductor.frame(1);
+document.getElementById('velocidad').onchange=e=>Reproductor.velocidad(parseFloat(e.target.value));
+document.getElementById('zoom').onchange=e=>{ estado.pxs=parseInt(e.target.value); pintarTimeline(); };
+
+// equipo activo
+document.getElementById('eqPropio').onclick=()=>cambiarEquipo('propio');
+document.getElementById('eqRival').onclick=()=>cambiarEquipo('rival');
+function cambiarEquipo(q){
+  estado.equipoActivo=q;
+  document.getElementById('eqPropio').classList.toggle('on',q==='propio');
+  document.getElementById('eqRival').classList.toggle('on',q==='rival');
+}
+
+// parte y saque inicial
+document.getElementById('btnParte').onclick=()=>{
+  estado.parte = estado.parte===1?2:1;
+  document.getElementById('btnParte').textContent=estado.parte+'ª parte';
+};
+document.getElementById('btnT0').onclick=()=>{
+  if(!Reproductor.tipo){ toast('Carga primero un vídeo.'); return; }
+  estado.partido.t0[estado.parte]=Reproductor.tiempo();
+  guardar();
+  toast('Saque inicial de la '+estado.parte+'ª parte fijado en '+tc(Reproductor.tiempo())+'.');
+};
+
+// barra superior
+document.getElementById('btnPartido').onclick=abrirPartido;
+document.getElementById('btnPlantillas').onclick=abrirPlantillas;
+document.getElementById('btnEventos').onclick=abrirEventos;
+document.getElementById('btnAyuda').onclick=abrirAyuda;
+document.getElementById('btnExport').onclick=exportarJSON;
+document.getElementById('btnImport').onclick=()=>document.getElementById('ficheroJson').click();
+document.getElementById('modalCerrar').onclick=cerrarModal;
+document.getElementById('modal').onclick=e=>{ if(e.target.id==='modal') cerrarModal(); };
+
+document.getElementById('ficheroJson').onchange=e=>{
+  const f=e.target.files[0]; if(!f) return;
+  const r=new FileReader();
+  r.onload=()=>{
+    try{
+      const d=JSON.parse(r.result);
+      estado.partido=d.partido||estado.partido;
+      estado.plantillaPropia=d.plantillaPropia||[];
+      estado.plantillaRival=d.plantillaRival||[];
+      estado.eventos=d.eventos||[];
+      guardar(); pintarTimeline();
+      toast('Proyecto importado · '+estado.eventos.length+' eventos. Vuelve a cargar el vídeo.');
+    }catch(err){ toast('Ese archivo no tiene el formato esperado.'); }
+  };
+  r.readAsText(f);
+};
+
+document.getElementById('btnBorrarSel').onclick=()=>{
+  if(estado.seleccion){ borrarEvento(estado.seleccion); cerrarModal(); seleccionar(null); }
+};
+
+// click en la timeline para saltar
+document.getElementById('tlScroll').onclick=e=>{
+  if(e.target.classList.contains('ev')) return;
+  const r=document.getElementById('tlLienzo').getBoundingClientRect();
+  Reproductor.ir((e.clientX-r.left)/estado.pxs);
+};
+
+// teclado
+document.addEventListener('keydown',e=>{
+  if(/INPUT|SELECT|TEXTAREA/.test(e.target.tagName)) return;
+  if(e.key==='Escape'){ cerrarModal(); return; }
+  if(document.getElementById('modal').classList.contains('abierto')) return;
+
+  const cat=CATEGORIAS.find(c=>c.tecla===e.key);
+  if(cat){ e.preventDefault(); marcar(cat.id); return; }
+
+  switch(e.key){
+    case ' ': e.preventDefault(); Reproductor.alternar(); setTimeout(botonPlay,60); break;
+    case 'ArrowLeft': e.preventDefault(); Reproductor.salto(e.shiftKey?-5:-1); break;
+    case 'ArrowRight': e.preventDefault(); Reproductor.salto(e.shiftKey?5:1); break;
+    case ',': Reproductor.frame(-1); break;
+    case '.': Reproductor.frame(1); break;
+    case 'Tab': e.preventDefault(); cambiarEquipo(estado.equipoActivo==='propio'?'rival':'propio'); break;
+  }
+});
+
+// arranque
+(async()=>{
+  await abrirDB();
+  const d=await cargar();
+  if(d && d.eventos && d.eventos.length){
+    estado.partido=d.partido||estado.partido;
+    estado.plantillaPropia=d.plantillaPropia||[];
+    estado.plantillaRival=d.plantillaRival||[];
+    estado.eventos=d.eventos||[];
+    toast('Sesión anterior recuperada · '+estado.eventos.length+' eventos. Carga el vídeo otra vez.');
+  }
+  pintarTimeline();
+})();
+</script>
+</body>
+</html>
