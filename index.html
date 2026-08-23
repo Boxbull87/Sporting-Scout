@@ -834,10 +834,12 @@ function abrirEventos(){
       'Carga un vídeo y pulsa las teclas 1–0 mientras lo ves.</div>');
     return;
   }
+  const esLocal = Reproductor.tipo==='local';
   const filas = estado.eventos.map(ev=>{
     const cat=CATEGORIAS.find(c=>c.id===ev.tipo);
     const j=buscarJugador(ev.jugadorRef);
     return `<tr>
+      <td><input type="checkbox" class="chk-export" data-id="${ev.id}" ${esLocal?'checked':'disabled'}></td>
       <td class="tc">${tc(ev.t_mark)}</td>
       <td><span class="pill" style="background:${cat.color}22;color:${cat.color}">${cat.nom}</span></td>
       <td>${ev.equipo==='propio'?'Propio':'Rival'}</td>
@@ -849,8 +851,28 @@ function abrirEventos(){
         <button class="btn" style="padding:2px 8px" onclick="borrarEvento('${ev.id}')">Borrar</button>
       </td></tr>`;
   }).join('');
-  modal('Eventos · '+estado.eventos.length,
-    `<table class="tabla"><thead><tr><th>Min</th><th>Categoría</th><th>Equipo</th><th>Jugador</th>
+
+  const avisoClips = esLocal? '' :
+    `<div class="aviso">La fuente actual es ${Reproductor.tipo==='youtube'?'YouTube':'ninguna'}: no se pueden
+     exportar clips físicos (YouTube no permite acceder al vídeo). Carga el archivo local del partido para
+     activar la exportación.</div>`;
+
+  modal('Eventos · '+estado.eventos.length, `
+    ${avisoClips}
+    <div class="fila-form" style="margin-bottom:10px">
+      <button class="btn" onclick="marcarTodosExport(true)" ${esLocal?'':'disabled'}>Marcar todos</button>
+      <button class="btn" onclick="marcarTodosExport(false)" ${esLocal?'':'disabled'}>Marcar ninguno</button>
+      <div class="campo">
+        <label>Modo de corte</label>
+        <select id="modoCorte" ${esLocal?'':'disabled'}>
+          <option value="copy">Rápido (puede desplazarse ±1-2s)</option>
+          <option value="exacto">Exacto (recodifica, más lento)</option>
+        </select>
+      </div>
+      <button class="btn btn-rojo" onclick="exportarClipsFFmpeg('bat')" ${esLocal?'':'disabled'}>Script .bat (Windows)</button>
+      <button class="btn" onclick="exportarClipsFFmpeg('sh')" ${esLocal?'':'disabled'}>Script .sh (Mac/Linux)</button>
+    </div>
+    <table class="tabla"><thead><tr><th></th><th>Min</th><th>Categoría</th><th>Equipo</th><th>Jugador</th>
      <th>Resultado</th><th>Clip</th><th></th></tr></thead><tbody>${filas}</tbody></table>`);
 }
 function irA(t){ cerrarModal(); Reproductor.ir(t); Reproductor.play(); }
@@ -858,6 +880,93 @@ function borrarEvento(id){
   const i=estado.eventos.findIndex(e=>e.id===id);
   if(i>=0) estado.eventos.splice(i,1);
   guardar(); pintarTimeline(); abrirEventos();
+}
+function marcarTodosExport(valor){
+  document.querySelectorAll('.chk-export').forEach(c=>{ if(!c.disabled) c.checked=valor; });
+}
+
+/* =====================================================================
+   EXPORTACIÓN DE CLIPS (script FFmpeg)
+   Solo genera texto: el corte real lo hace el usuario en su propia
+   máquina al ejecutar el script, junto al archivo de vídeo original.
+   ===================================================================== */
+
+function limpiarNombre(s){
+  return (s||'').toString().normalize('NFD').replace(/[̀-ͯ]/g,'')
+    .replace(/[^a-zA-Z0-9]+/g,'_').replace(/^_+|_+$/g,'') || 'x';
+}
+
+function exportarClipsFFmpeg(formato){
+  if(Reproductor.tipo!=='local'){
+    toast('Carga el vídeo local del partido para poder exportar clips.');
+    return;
+  }
+  const ids = Array.from(document.querySelectorAll('.chk-export:checked')).map(c=>c.dataset.id);
+  if(!ids.length){ toast('No has marcado ningún evento para exportar.'); return; }
+  const modoExacto = document.getElementById('modoCorte').value==='exacto';
+
+  const eventos = estado.eventos.filter(e=>ids.includes(e.id)).sort((a,b)=>a.t_in-b.t_in);
+  const nombreVideo = estado.partido.refVideo || 'video.mp4';
+  const nombreClips = 'clips_'+limpiarNombre(estado.partido.equipoRival||'partido');
+  const refVar = formato==='bat' ? '%VIDEO%' : '$VIDEO';
+
+  const lineas = eventos.map((ev,i)=>{
+    const cat=CATEGORIAS.find(c=>c.id===ev.tipo);
+    const j=buscarJugador(ev.jugadorRef);
+    const dur = Math.max(0.1, ev.t_out-ev.t_in);
+    const partes = [String(i+1).padStart(3,'0'), cat?cat.id:ev.tipo, ev.equipo,
+      j?('d'+limpiarNombre(j.dorsal)):null, ev.resultado?limpiarNombre(ev.resultado):null,
+      tc(ev.t_in).replace(':','-')];
+    const archivo = partes.filter(Boolean).join('_')+'.mp4';
+    const codec = modoExacto
+      ? '-c:v libx264 -preset fast -crf 18 -c:a aac -b:a 192k'
+      : '-c copy';
+    return `ffmpeg -y -ss ${ev.t_in.toFixed(2)} -i "${refVar}" -t ${dur.toFixed(2)} ${codec} "${nombreClips}/${archivo}"`;
+  });
+
+  let contenido, ext, mime;
+  if(formato==='bat'){
+    contenido = [
+      '@echo off',
+      'REM Generado por Scouting FS · '+new Date().toLocaleString(),
+      'REM Coloca este script en la MISMA carpeta que el video del partido,',
+      'REM o cambia la linea VIDEO=... por la ruta completa al archivo.',
+      'REM Necesita ffmpeg instalado y accesible desde la terminal (https://ffmpeg.org/download.html).',
+      '',
+      'set VIDEO='+nombreVideo,
+      'if not exist "'+nombreClips+'" mkdir "'+nombreClips+'"',
+      '',
+      ...lineas,
+      '',
+      'echo.',
+      'echo Listo. Clips en la carpeta "'+nombreClips+'".',
+      'pause'
+    ].join('\r\n');
+    ext='bat'; mime='application/bat';
+  } else {
+    contenido = [
+      '#!/bin/bash',
+      '# Generado por Scouting FS · '+new Date().toLocaleString(),
+      '# Coloca este script en la MISMA carpeta que el video del partido,',
+      '# o cambia la linea VIDEO=... por la ruta completa al archivo.',
+      '# Necesita ffmpeg instalado (https://ffmpeg.org/download.html).',
+      '',
+      'VIDEO="'+nombreVideo+'"',
+      'mkdir -p "'+nombreClips+'"',
+      '',
+      ...lineas,
+      '',
+      'echo "Listo. Clips en la carpeta \''+nombreClips+'\'."'
+    ].join('\n');
+    ext='sh'; mime='text/x-sh';
+  }
+
+  const blob=new Blob([contenido],{type:mime});
+  const a=document.createElement('a');
+  a.href=URL.createObjectURL(blob);
+  a.download='exportar_clips_'+limpiarNombre(estado.partido.equipoRival||'partido')+'.'+ext;
+  a.click();
+  toast('Script generado · '+eventos.length+' clips. Ejecútalo junto al vídeo del partido.');
 }
 
 function abrirAyuda(){
