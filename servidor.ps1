@@ -1,4 +1,4 @@
-# Servidor local minimo para abrir scouting-fs.html por http:// (necesario para que YouTube funcione).
+# Servidor local minimo para abrir index.html por http:// (necesario para que YouTube funcione).
 # Uso: clic derecho > "Ejecutar con PowerShell", o desde una terminal:
 #   powershell -ExecutionPolicy Bypass -File servidor.ps1
 
@@ -22,10 +22,10 @@ try {
 }
 
 Write-Host "Servidor arrancado." -ForegroundColor Green
-Write-Host "Abre en tu navegador:  http://localhost:$puerto/scouting-fs.html" -ForegroundColor Cyan
+Write-Host "Abre en tu navegador:  http://localhost:$puerto/index.html" -ForegroundColor Cyan
 Write-Host "Deja esta ventana abierta mientras uses la app. Ctrl+C para parar." -ForegroundColor DarkGray
 
-Start-Process "http://localhost:$puerto/scouting-fs.html"
+Start-Process "http://localhost:$puerto/index.html"
 
 while ($listener.IsListening) {
     $contexto = $listener.GetContext()
@@ -33,7 +33,7 @@ while ($listener.IsListening) {
     $respuesta = $contexto.Response
     try {
         $ruta = [System.Uri]::UnescapeDataString($peticion.Url.LocalPath)
-        if ($ruta -eq '/') { $ruta = '/scouting-fs.html' }
+        if ($ruta -eq '/') { $ruta = '/index.html' }
         $archivo = Join-Path $carpeta ($ruta.TrimStart('/'))
 
         if (Test-Path $archivo -PathType Leaf) {
