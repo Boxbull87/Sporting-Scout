@@ -8,6 +8,22 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@400;500;600;700&family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
+<!-- Mismo proyecto Firebase que Sporting Entrenamientos: Scouting solo LEE plantilla/jornadas
+     de allí y ESCRIBE en sus propias colecciones (partidos_scouting/eventos_scouting).
+     Nunca escribe en teams/players/matchdays/coaches. -->
+<script>
+  const SPORTING_FIREBASE_CONFIG = {
+    apiKey: "AIzaSyCfSm5q3gRSx3lUq0BGEYxB-M_sFCLNa2g",
+    authDomain: "sporting-entrenamientos.firebaseapp.com",
+    projectId: "sporting-entrenamientos",
+    storageBucket: "sporting-entrenamientos.firebasestorage.app",
+    messagingSenderId: "306369015696",
+    appId: "1:306369015696:web:6aa31daf89e88c00db4d15"
+  };
+</script>
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-auth-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore-compat.js"></script>
 <style>
 :root{
   --bg:#0E1013;
@@ -240,7 +256,8 @@ input:focus,select:focus,button:focus-visible{outline:2px solid var(--rojo);outl
   <button class="btn" id="btnStats">Estadísticas</button>
   <button class="btn" id="btnAyuda">Atajos</button>
   <button class="btn" id="btnExport">Exportar</button>
-  <button class="btn btn-rojo" id="btnImport">Importar</button>
+  <button class="btn" id="btnImport">Importar</button>
+  <button class="btn btn-rojo" id="btnSync">Sincronizar</button>
 </div>
 
 <div class="cuerpo">
@@ -627,7 +644,11 @@ function abrirRapida(ev,cat){
       const b=document.createElement('button');
       b.className='dorsal'; b.textContent=j.dorsal;
       b.title=j.nombre||('Dorsal '+j.dorsal);
-      b.onclick=()=>{ ev.jugadorRef={tipo:ev.equipo,id:j.id}; pintarTimeline(); guardar();
+      b.onclick=()=>{ ev.jugadorRef={tipo:ev.equipo,id:j.id};
+        // etiqueta "congelada" en el propio evento: si el jugador se borra en Sporting
+        // más adelante, seguimos mostrando quién era en vez de romper la pantalla.
+        ev.jugadorEtiqueta='#'+j.dorsal+(j.nombre?' '+j.nombre:'');
+        pintarTimeline(); guardar();
         b.style.background='var(--rojo)'; };
       cd.appendChild(b);
     });
@@ -743,15 +764,23 @@ function seleccionar(id){
 
 function etiquetaEvento(ev){
   const cat=estado.categorias.find(c=>c.id===ev.tipo);
-  const j=buscarJugador(ev.jugadorRef);
   return [tc(ev.t_mark), cat?cat.nom:ev.tipo, ev.equipo==='propio'?'propio':'rival',
-          j?('#'+j.dorsal+(j.nombre?' '+j.nombre:'')):'', ev.resultado||''].filter(Boolean).join(' · ');
+          etiquetaJugador(ev), ev.resultado||''].filter(Boolean).join(' · ');
 }
 
 function buscarJugador(ref){
   if(!ref) return null;
   const lista = ref.tipo==='propio'? estado.plantillaPropia : estado.plantillaRival;
   return lista.find(j=>j.id===ref.id)||null;
+}
+// Etiqueta a mostrar para el jugador de un evento. Si el jugador ya no está en la
+// plantilla actual (p.ej. lo borraron en Sporting), cae en la etiqueta que se
+// "congeló" en el propio evento al asignarlo, en vez de perder la referencia.
+function etiquetaJugador(ev, sinAsignar){
+  const j=buscarJugador(ev.jugadorRef);
+  if(j) return '#'+j.dorsal+(j.nombre?' '+j.nombre:'');
+  if(ev.jugadorEtiqueta) return ev.jugadorEtiqueta+' (no encontrado)';
+  return sinAsignar!==undefined? sinAsignar : '';
 }
 
 /* cabezal + reloj a 10 fps */
@@ -842,6 +871,138 @@ function exportarJSON(){
 }
 
 /* =====================================================================
+   CONEXIÓN CON SPORTING (Firestore)
+   Mismo proyecto que Sporting Entrenamientos, pero fronteras estrictas:
+   Scouting solo LEE teams/players/matchdays/coaches (nunca escribe ahí) y
+   solo ESCRIBE en sus propias colecciones partidos_scouting/eventos_scouting.
+   La conexión es opcional: la app funciona igual sin iniciar sesión, solo
+   que entonces no hay vínculo con Sporting ni plantilla real que cargar.
+   ===================================================================== */
+
+firebase.initializeApp(SPORTING_FIREBASE_CONFIG);
+const sportingAuth = firebase.auth();
+const sportingDb = firebase.firestore();
+const ROLE_GESTOR='gestor', ROLE_EDITOR='editor';
+
+let sporting = {uid:null, coach:null, equipos:[], teamId:null, jornadas:[]};
+
+function traducirErrorAuth(err){
+  const map={
+    'auth/invalid-email':'Email no válido.',
+    'auth/user-not-found':'No existe esa cuenta en Sporting.',
+    'auth/wrong-password':'Contraseña incorrecta.',
+    'auth/invalid-credential':'Email o contraseña incorrectos.',
+    'auth/too-many-requests':'Demasiados intentos, prueba más tarde.'
+  };
+  return map[err.code] || err.message;
+}
+
+async function conectarSporting(email,pass){
+  try{
+    const cred = await sportingAuth.signInWithEmailAndPassword(email,pass);
+    const uid = cred.user.uid;
+    const doc = await sportingDb.collection('coaches').doc(uid).get();
+    if(!doc.exists){
+      await sportingAuth.signOut();
+      return {ok:false, error:'Esta cuenta no está registrada como entrenador en Sporting.'};
+    }
+    const coach = doc.data();
+    if(!coach.active){
+      await sportingAuth.signOut();
+      return {ok:false, error:'Tu cuenta de Sporting todavía no está activada por un gestor.'};
+    }
+    sporting.uid = uid;
+    sporting.coach = coach;
+    await cargarEquiposSporting();
+    return {ok:true};
+  }catch(err){
+    return {ok:false, error:traducirErrorAuth(err)};
+  }
+}
+function desconectarSporting(){
+  sportingAuth.signOut();
+  sporting = {uid:null, coach:null, equipos:[], teamId:null, jornadas:[]};
+}
+async function cargarEquiposSporting(){
+  const snap = await sportingDb.collection('teams').get();
+  const todos = snap.docs.map(d=>({id:d.id, ...d.data()}));
+  const c = sporting.coach;
+  const veTodos = c.role===ROLE_GESTOR || c.role===ROLE_EDITOR; // misma regla que coachVisibleTeams_ en Sporting
+  sporting.equipos = veTodos? todos : todos.filter(t=>(c.teamIds||[]).includes(t.id));
+}
+async function cargarJornadasSporting(teamId){
+  const snap = await sportingDb.collection('matchdays').where('teamId','==',teamId).get();
+  sporting.jornadas = snap.docs.map(d=>({id:d.id, ...d.data()})).sort((a,b)=>(b.number||0)-(a.number||0));
+}
+async function cargarPlantillaDesdeSporting(teamId){
+  const snap = await sportingDb.collection('players').where('teamId','==',teamId).get();
+  estado.plantillaPropia = snap.docs.map(d=>{
+    const p=d.data();
+    return {id:d.id, dorsal: p.dorsal!=null? String(p.dorsal) : '?',
+      nombre:p.name||'', posicion:p.position==='Portero'?'Portero':'Jugador', origenSporting:true};
+  }).sort((a,b)=>(Number(a.dorsal)||99)-(Number(b.dorsal)||99));
+}
+async function vincularJornada(jornadaId){
+  const j = sporting.jornadas.find(x=>x.id===jornadaId);
+  if(!j) return;
+  const p = estado.partido;
+  p.vinculado = true;
+  p.partidoSportingId = jornadaId;
+  p.teamIdSporting = sporting.teamId;
+  p.equipoRival = j.rival || p.equipoRival;
+  p.fecha = j.date || p.fecha;
+  p.competicion = j.competition || p.competicion;
+  p.numeroJornada = j.number || null;
+  guardar();
+  if(j.videoUrl && Reproductor.tipo!=='local'){
+    const campo=document.getElementById('ytUrl');
+    if(campo && !campo.value) campo.value=j.videoUrl;
+    toast('Esta jornada tiene vídeo en Sporting: lo he puesto en el campo de YouTube, pulsa "Cargar de YouTube".');
+  }
+}
+function desvincularPartido(){
+  const p=estado.partido;
+  p.vinculado=false; p.partidoSportingId=null; p.numeroJornada=null;
+  guardar();
+}
+
+// Sube el partido y sus eventos a partidos_scouting/eventos_scouting. Nunca toca
+// teams/players/matchdays/coaches. Usa el id del propio evento como id de documento
+// para que repetir la sincronización actualice en vez de duplicar.
+async function sincronizarConFirestore(){
+  if(!sporting.uid){ toast('Conecta con Sporting primero (botón Partido → Conexión con Sporting).'); return; }
+  if(!estado.eventos.length){ toast('No hay eventos que sincronizar todavía.'); return; }
+  toast('Sincronizando con Sporting…');
+  try{
+    const p = estado.partido;
+    await sportingDb.collection('partidos_scouting').doc(p.id).set({
+      vinculado: !!p.vinculado,
+      partidoSportingId: p.partidoSportingId || null,
+      teamIdSporting: p.teamIdSporting || sporting.teamId || null,
+      equipoPropio: p.equipoPropio, equipoRival: p.equipoRival,
+      fecha: p.fecha, competicion: p.competicion, esRivalFuturo: !!p.esRivalFuturo,
+      coachUid: sporting.uid,
+      actualizado: firebase.firestore.FieldValue.serverTimestamp()
+    }, {merge:true});
+
+    const TAM=400; // por debajo del límite de 500 escrituras por lote de Firestore
+    for(let i=0;i<estado.eventos.length;i+=TAM){
+      const lote = sportingDb.batch();
+      estado.eventos.slice(i,i+TAM).forEach(ev=>{
+        const ref = sportingDb.collection('eventos_scouting').doc(ev.id);
+        lote.set(ref, {...ev, partidoId:p.id, coachUid:sporting.uid}, {merge:true});
+      });
+      await lote.commit();
+    }
+    estado.ultimoSync = new Date().toISOString();
+    guardar();
+    toast('Sincronizado · '+estado.eventos.length+' eventos.');
+  }catch(err){
+    toast('Error al sincronizar: '+err.message);
+  }
+}
+
+/* =====================================================================
    MODALES
    ===================================================================== */
 
@@ -855,9 +1016,7 @@ function cerrarModal(){ document.getElementById('modal').classList.remove('abier
 function abrirPartido(){
   const p=estado.partido;
   modal('Datos del partido', `
-    <div class="aviso">Este prototipo trabaja en local. El selector de partidos ya creados en Sporting
-    se añadirá cuando conectemos Firestore; el campo <code>partidoSportingId</code> ya existe en el modelo
-    y se quedará vacío mientras el partido sea independiente.</div>
+    ${renderBloqueSporting()}
     <div class="fila-form">
       <div class="campo"><label>Equipo propio</label><input id="fPropio" value="${p.equipoPropio}"></div>
       <div class="campo"><label>Rival</label><input id="fRival" value="${p.equipoRival}"></div>
@@ -881,6 +1040,85 @@ function abrirPartido(){
       2ª parte: <b>${p.t0[2]!==null?tc(p.t0[2]):'sin fijar'}</b>
     </p>`);
 }
+
+function renderBloqueSporting(){
+  if(!sporting.uid){
+    return `
+    <div class="aviso" style="background:rgba(93,125,214,.1);border-color:rgba(93,125,214,.35);color:#C4D1F5">
+      <b>Conexión con Sporting</b> (opcional). Inicia sesión con tu cuenta de Sporting Entrenamientos
+      para vincular este partido a una jornada ya creada allí y cargar la plantilla real del equipo.
+      Si no conectas, la app sigue funcionando igual, solo en local.</div>
+    <div class="fila-form" style="margin-bottom:16px">
+      <div class="campo"><label>Email</label><input id="spEmail" type="email" style="width:200px"></div>
+      <div class="campo"><label>Contraseña</label><input id="spPass" type="password" style="width:160px"></div>
+      <button class="btn" onclick="conectarSportingDesdeForm()">Conectar</button>
+    </div>`;
+  }
+
+  const c=sporting.coach;
+  const roleLabels={gestor:'Gestor',editor:'Editor',entrenador:'Entrenador'};
+  let equiposHtml;
+  if(sporting.equipos.length){
+    equiposHtml = `<div class="campo"><label>Equipo</label>
+      <select id="spEquipo" onchange="cambiarEquipoSporting(this.value)">
+        <option value="">— elegir —</option>
+        ${sporting.equipos.map(e=>`<option value="${e.id}" ${sporting.teamId===e.id?'selected':''}>${e.name}</option>`).join('')}
+      </select></div>`;
+  } else {
+    equiposHtml = '<p style="color:var(--muted);font-size:11px">No tienes ningún equipo asignado en Sporting.</p>';
+  }
+
+  let jornadasHtml='';
+  if(sporting.teamId){
+    if(estado.partido.vinculado){
+      jornadasHtml = `<p style="font-size:11px;color:var(--muted);margin-top:8px">
+        Vinculado a la jornada de Sporting <b>#${estado.partido.numeroJornada||'?'}</b>.
+        <button class="btn" style="padding:2px 8px" onclick="desvincularPartidoDesdeForm()">Quitar vínculo</button></p>`;
+    } else if(sporting.jornadas.length){
+      jornadasHtml = `<div class="fila-form" style="margin-top:8px">
+        <div class="campo"><label>Jornada</label>
+          <select id="spJornada">
+            ${sporting.jornadas.map(j=>`<option value="${j.id}">${j.number} · ${j.rival||'?'} · ${j.date||'sin fecha'}</option>`).join('')}
+          </select></div>
+        <button class="btn" onclick="vincularJornadaDesdeForm()">Vincular este partido</button>
+      </div>`;
+    } else {
+      jornadasHtml = '<p style="color:var(--muted);font-size:11px;margin-top:8px">Este equipo no tiene jornadas creadas en Sporting.</p>';
+    }
+  }
+
+  return `
+  <div class="aviso" style="background:rgba(63,178,127,.1);border-color:rgba(63,178,127,.35);color:#9FE0C3">
+    Conectado a Sporting como <b>${c.name}</b> (${roleLabels[c.role]||c.role})
+    <button class="btn" style="padding:2px 8px;margin-left:8px" onclick="desconectarSportingDesdeForm()">Cerrar sesión</button>
+  </div>
+  <div class="fila-form">${equiposHtml}</div>
+  ${jornadasHtml}`;
+}
+
+async function conectarSportingDesdeForm(){
+  const email=document.getElementById('spEmail').value.trim();
+  const pass=document.getElementById('spPass').value;
+  if(!email||!pass){ toast('Pon email y contraseña.'); return; }
+  const r = await conectarSporting(email,pass);
+  if(r.ok){ toast('Conectado a Sporting.'); abrirPartido(); }
+  else toast(r.error);
+}
+function desconectarSportingDesdeForm(){ desconectarSporting(); toast('Sesión de Sporting cerrada.'); abrirPartido(); }
+async function cambiarEquipoSporting(teamId){
+  sporting.teamId = teamId || null;
+  sporting.jornadas = [];
+  if(teamId) await cargarJornadasSporting(teamId);
+  abrirPartido();
+}
+async function vincularJornadaDesdeForm(){
+  const id=document.getElementById('spJornada').value;
+  if(!id) return;
+  await vincularJornada(id);
+  toast('Partido vinculado a Sporting.');
+  abrirPartido();
+}
+function desvincularPartidoDesdeForm(){ desvincularPartido(); toast('Vínculo con Sporting eliminado.'); abrirPartido(); }
 function guardarPartido(){
   const p=estado.partido;
   p.equipoPropio=document.getElementById('fPropio').value;
@@ -892,13 +1130,30 @@ function guardarPartido(){
 }
 
 function abrirPlantillas(){
+  const equipoNombre = sporting.teamId? (sporting.equipos.find(e=>e.id===sporting.teamId)||{}).name : '';
+  const bloqueSporting = sporting.uid && sporting.teamId
+    ? `<div class="fila-form" style="margin-bottom:6px">
+        <button class="btn btn-rojo" onclick="cargarPlantillaDesdeSportingDesdeForm()">Cargar plantilla propia desde Sporting</button>
+        <span style="color:var(--muted);font-size:11px">Trae los jugadores de "${equipoNombre}" y sustituye la lista de abajo.</span>
+      </div>`
+    : sporting.uid
+    ? `<div class="aviso">Elige un equipo en <b>Partido → Conexión con Sporting</b> para poder cargar su plantilla real.</div>`
+    : `<div class="aviso">La plantilla propia se puede cargar desde Sporting (mismos ids de jugador, así las
+       estadísticas se acumulan entre partidos). Conéctate desde <b>Partido → Conexión con Sporting</b>.
+       Mientras tanto se introduce a mano aquí.</div>`;
   modal('Plantillas', `
-    <div class="aviso">La plantilla propia se cargará desde la colección <code>plantilla</code> de Sporting
-    cuando conectemos Firestore, con los mismos ids de jugador. Mientras tanto se introduce a mano aquí.
-    La plantilla rival vive dentro de este partido: si el rival se repite, la promocionaremos a una
-    colección propia.</div>
+    ${bloqueSporting}
+    <div class="aviso">La plantilla rival vive dentro de este partido: si el rival se repite, la
+    promocionaremos a una colección propia.</div>
     ${bloquePlantilla('propio','Plantilla propia')}
     ${bloquePlantilla('rival','Plantilla rival')}`);
+}
+async function cargarPlantillaDesdeSportingDesdeForm(){
+  if(estado.plantillaPropia.length &&
+     !confirm('Esto reemplaza la plantilla propia actual por la de Sporting. ¿Continuar?')) return;
+  await cargarPlantillaDesdeSporting(sporting.teamId);
+  guardar(); abrirPlantillas();
+  toast('Plantilla cargada desde Sporting · '+estado.plantillaPropia.length+' jugadores.');
 }
 function bloquePlantilla(tipo,titulo){
   const lista = tipo==='propio'? estado.plantillaPropia : estado.plantillaRival;
@@ -946,13 +1201,12 @@ function abrirEventos(){
   const esLocal = Reproductor.tipo==='local';
   const filas = estado.eventos.map(ev=>{
     const cat=estado.categorias.find(c=>c.id===ev.tipo) || {nom:ev.tipo,color:'#7E8CA0'};
-    const j=buscarJugador(ev.jugadorRef);
     return `<tr>
       <td><input type="checkbox" class="chk-export" data-id="${ev.id}" ${esLocal?'checked':'disabled'}></td>
       <td class="tc">${tc(ev.t_mark)}</td>
       <td><span class="pill" style="background:${cat.color}22;color:${cat.color}">${cat.nom}</span></td>
       <td>${ev.equipo==='propio'?'Propio':'Rival'}</td>
-      <td>${j? '#'+j.dorsal+(j.nombre?' '+j.nombre:'') : '<span style="color:var(--muted)">sin asignar</span>'}</td>
+      <td>${etiquetaJugador(ev)||'<span style="color:var(--muted)">sin asignar</span>'}</td>
       <td>${ev.resultado||'—'}</td>
       <td class="tc" style="color:var(--muted);white-space:nowrap;font-size:10px">
         <button class="btn" style="padding:0 4px" onclick="ajustarTiempo('${ev.id}','t_in',-1)">−</button>
@@ -1031,8 +1285,9 @@ function limpiarNombre(s){
 function nombreClip(ev,indice){
   const cat=estado.categorias.find(c=>c.id===ev.tipo);
   const j=buscarJugador(ev.jugadorRef);
+  const jugadorParte = j? 'd'+limpiarNombre(j.dorsal) : (ev.jugadorEtiqueta? limpiarNombre(ev.jugadorEtiqueta) : null);
   const partes=[String(indice).padStart(3,'0'), cat?cat.id:ev.tipo, ev.equipo,
-    j?('d'+limpiarNombre(j.dorsal)):null, ev.resultado?limpiarNombre(ev.resultado):null,
+    jugadorParte, ev.resultado?limpiarNombre(ev.resultado):null,
     tc(ev.t_in).replace(':','-')];
   return partes.filter(Boolean).join('_');
 }
@@ -1263,7 +1518,9 @@ function agruparPorJugador(eventos){
 function nombreGrupo(g){
   if(!g.jugadorRef) return 'Sin asignar ('+(g.equipo==='propio'?'propio':'rival')+')';
   const j=buscarJugador(g.jugadorRef);
-  return j? '#'+j.dorsal+(j.nombre?' '+j.nombre:'') : '#?';
+  if(j) return '#'+j.dorsal+(j.nombre?' '+j.nombre:'');
+  const etiqueta = g.eventos.find(e=>e.jugadorEtiqueta)?.jugadorEtiqueta;
+  return etiqueta? etiqueta+' (no encontrado)' : '#?';
 }
 
 function abrirEstadisticas(){
@@ -1594,6 +1851,7 @@ document.getElementById('btnStats').onclick=abrirEstadisticas;
 document.getElementById('btnAyuda').onclick=abrirAyuda;
 document.getElementById('btnExport').onclick=exportarJSON;
 document.getElementById('btnImport').onclick=()=>document.getElementById('ficheroJson').click();
+document.getElementById('btnSync').onclick=sincronizarConFirestore;
 document.getElementById('modalCerrar').onclick=cerrarModal;
 document.getElementById('modal').onclick=e=>{ if(e.target.id==='modal') cerrarModal(); };
 document.getElementById('expCancelar').onclick=()=>{ cancelarExport=true; };
