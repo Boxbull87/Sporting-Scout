@@ -124,6 +124,8 @@ input:focus,select:focus,button:focus-visible{outline:2px solid var(--rojo);outl
 .cat:hover{background:#252A33}
 .cat:active{transform:scale(.97)}
 .cat.flash{background:var(--rojo);border-color:var(--rojo)}
+.cat.grabando{background:var(--rojo);border-color:var(--rojo);animation:pulso 1s ease-in-out infinite}
+@keyframes pulso{0%,100%{opacity:1}50%{opacity:.5}}
 .cat b{display:block;font-family:var(--display);font-size:15px;font-weight:600;letter-spacing:.03em;
   text-transform:uppercase;line-height:1.1}
 .cat i{display:block;font-style:normal;font-size:10px;color:var(--muted);margin-top:3px}
@@ -138,6 +140,10 @@ input:focus,select:focus,button:focus-visible{outline:2px solid var(--rojo);outl
 .rapida.abierta{display:block}
 .rapida h4{font-family:var(--display);font-size:15px;font-weight:600;text-transform:uppercase;
   letter-spacing:.04em;margin-bottom:8px}
+.ajuste-tiempo{display:flex;flex-direction:column;gap:4px;margin-bottom:9px;padding:7px 8px;
+  background:var(--panel);border:1px solid var(--line);border-radius:4px;font-size:11px}
+.ajuste-fila{display:flex;align-items:center;justify-content:space-between;gap:6px}
+.ajuste-fila button{padding:2px 7px}
 .dorsales{display:flex;flex-wrap:wrap;gap:5px;margin-bottom:8px}
 .dorsal{
   min-width:32px;padding:6px 7px;border:1px solid var(--line);border-radius:4px;background:var(--panel);
@@ -172,6 +178,7 @@ input:focus,select:focus,button:focus-visible{outline:2px solid var(--rojo);outl
 }
 .ev:hover{filter:brightness(1.35)}
 .ev.sel{outline:2px solid #fff;outline-offset:1px}
+.ev.abierta{outline:1px dashed #fff;outline-offset:0}
 .cabezal{position:absolute;top:0;bottom:0;width:2px;background:var(--rojo);pointer-events:none;z-index:4}
 .cabezal::before{content:'';position:absolute;top:0;left:-4px;border-left:5px solid transparent;
   border-right:5px solid transparent;border-top:7px solid var(--rojo)}
@@ -228,6 +235,7 @@ input:focus,select:focus,button:focus-visible{outline:2px solid var(--rojo);outl
   <div class="top-sep"></div>
   <button class="btn" id="btnPartido">Partido</button>
   <button class="btn" id="btnPlantillas">Plantillas</button>
+  <button class="btn" id="btnCategorias">Categorías</button>
   <button class="btn" id="btnEventos">Eventos <span id="numEv">0</span></button>
   <button class="btn" id="btnStats">Estadísticas</button>
   <button class="btn" id="btnAyuda">Atajos</button>
@@ -301,6 +309,7 @@ input:focus,select:focus,button:focus-visible{outline:2px solid var(--rojo);outl
     </div>
     <div class="rapida" id="rapida">
       <h4 id="rapidaTitulo">Asignar</h4>
+      <div class="ajuste-tiempo" id="rapidaAjuste"></div>
       <div class="dorsales" id="rapidaDorsales"></div>
       <div class="resultados" id="rapidaResultados"></div>
     </div>
@@ -341,19 +350,30 @@ input:focus,select:focus,button:focus-visible{outline:2px solid var(--rojo);outl
    Todo se deriva de la lista de eventos. Nunca se guardan agregados.
    ===================================================================== */
 
-const CATEGORIAS = [
-  {id:'gol',      nom:'Gol',            corto:'Gol',    tecla:'1', color:'#D8232A', pre:8, post:4, resultados:[]},
+// Plantilla inicial de categorías: solo se usa para poblar estado.categorias
+// la primera vez. A partir de ahí, todo se lee/edita desde estado.categorias
+// (editable en directo desde el botón "Categorías").
+const CATEGORIAS_DEFECTO = [
+  {id:'gol',      nom:'Gol',            corto:'Gol',    tecla:'1', color:'#D8232A', pre:8, post:4,
+   modo:'auto', activa:true, stats:true, resultados:[]},
   {id:'tiro',     nom:'Tiro',           corto:'Tiro',   tecla:'2', color:'#E8703A', pre:6, post:3,
-   resultados:['A puerta','Fuera','Bloqueado','Al palo']},
-  {id:'parada',   nom:'Parada',         corto:'Parada', tecla:'3', color:'#3FB27F', pre:6, post:3, resultados:[]},
-  {id:'robo',     nom:'Robo',           corto:'Robo',   tecla:'4', color:'#2E9BB7', pre:5, post:5, resultados:[]},
-  {id:'perdida',  nom:'Pérdida',        corto:'Pérd.',  tecla:'5', color:'#9B59B6', pre:5, post:5, resultados:[]},
-  {id:'falta',    nom:'Falta',          corto:'Falta',  tecla:'6', color:'#E0A32E', pre:5, post:3, resultados:['Cometida','Recibida']},
+   modo:'auto', activa:true, stats:true, resultados:['A puerta','Fuera','Bloqueado','Al palo']},
+  {id:'parada',   nom:'Parada',         corto:'Parada', tecla:'3', color:'#3FB27F', pre:6, post:3,
+   modo:'auto', activa:true, stats:true, resultados:[]},
+  {id:'robo',     nom:'Robo',           corto:'Robo',   tecla:'4', color:'#2E9BB7', pre:5, post:5,
+   modo:'auto', activa:true, stats:true, resultados:[]},
+  {id:'perdida',  nom:'Pérdida',        corto:'Pérd.',  tecla:'5', color:'#9B59B6', pre:5, post:5,
+   modo:'auto', activa:true, stats:true, resultados:[]},
+  {id:'falta',    nom:'Falta',          corto:'Falta',  tecla:'6', color:'#E0A32E', pre:5, post:3,
+   modo:'auto', activa:true, stats:true, resultados:['Cometida','Recibida']},
   {id:'abp',      nom:'ABP',            corto:'ABP',    tecla:'7', color:'#5D7DD6', pre:6, post:6,
-   resultados:['Córner','Banda','Falta','Doble penalti','Penalti']},
-  {id:'1x1',      nom:'1×1',            corto:'1×1',    tecla:'8', color:'#C86FA8', pre:5, post:4, resultados:['Superado','Fallado']},
-  {id:'pj',       nom:'Portero-jugador',corto:'P-J',    tecla:'9', color:'#7E8CA0', pre:10,post:6, resultados:['A favor','En contra']},
-  {id:'transicion',nom:'Transición',    corto:'Trans.', tecla:'0', color:'#48A868', pre:7, post:6, resultados:[]}
+   modo:'auto', activa:true, stats:true, resultados:['Córner','Banda','Falta','Doble penalti','Penalti']},
+  {id:'1x1',      nom:'1×1',            corto:'1×1',    tecla:'8', color:'#C86FA8', pre:5, post:4,
+   modo:'auto', activa:true, stats:true, resultados:['Superado','Fallado']},
+  {id:'pj',       nom:'Portero-jugador',corto:'P-J',    tecla:'9', color:'#7E8CA0', pre:10,post:6,
+   modo:'auto', activa:true, stats:true, resultados:['A favor','En contra']},
+  {id:'transicion',nom:'Transición',    corto:'Trans.', tecla:'0', color:'#48A868', pre:7, post:6,
+   modo:'auto', activa:true, stats:true, resultados:[]}
 ];
 
 const estado = {
@@ -370,6 +390,8 @@ const estado = {
     refVideo:'',               // nombre de archivo o id de YouTube
     t0:{1:null,2:null}         // segundo de vídeo en el que empieza cada parte
   },
+  categorias: CATEGORIAS_DEFECTO.map(c=>({...c, resultados:[...c.resultados]})),
+  enCurso:{},                  // categorías en modo manual con un evento abierto: {catId: evento}
   plantillaPropia:[],          // ← futuro: se cargará de la colección `plantilla` de Sporting
   plantillaRival:[],           // vive dentro del partido mientras el rival no se repita
   eventos:[],
@@ -512,18 +534,14 @@ function extraerIdYT(u){
    MARCAJE
    ===================================================================== */
 
-function marcar(catId){
-  if(!Reproductor.tipo){ toast('Carga primero un vídeo.'); return; }
-  const cat = CATEGORIAS.find(c=>c.id===catId);
-  const t = Reproductor.tiempo();
-
-  const ev = {
+function nuevoEvento(cat,t_in,t_out,t_mark){
+  return {
     id:'e_'+Date.now()+'_'+Math.random().toString(36).slice(2,7),
     partidoId: estado.partido.id,
     tipo: cat.id,
-    t_mark: t,
-    t_in: Math.max(0, t-cat.pre),
-    t_out: t+cat.post,
+    t_mark: t_mark,
+    t_in: t_in,
+    t_out: t_out,
     equipo: estado.equipoActivo,
     jugadorRef: null,            // {tipo:'propio'|'rival', id}
     resultado: null,
@@ -532,6 +550,42 @@ function marcar(catId){
     nota: '',
     creado: new Date().toISOString()
   };
+}
+
+function marcar(catId){
+  if(!Reproductor.tipo){ toast('Carga primero un vídeo.'); return; }
+  const cat = estado.categorias.find(c=>c.id===catId);
+  if(!cat) return;
+  const t = Reproductor.tiempo();
+
+  if(cat.modo==='manual'){
+    if(estado.enCurso[catId]){
+      // segunda pulsación: cierra el evento abierto
+      const ev = estado.enCurso[catId];
+      ev.t_out = Math.max(ev.t_in+0.3, t+(cat.post||0));
+      delete ev.abierto;
+      delete estado.enCurso[catId];
+      marcarGrabando(catId,false);
+      parpadeo(catId);
+      estado.eventos.sort((a,b)=>a.t_mark-b.t_mark);
+      abrirRapida(ev,cat);
+      pintarTimeline();
+      guardar();
+    } else {
+      // primera pulsación: abre el evento y empieza a crecer en la timeline
+      const ev = nuevoEvento(cat, Math.max(0,t-(cat.pre||0)), t, t);
+      ev.abierto = true;
+      estado.eventos.push(ev);
+      estado.enCurso[catId]=ev;
+      marcarGrabando(catId,true);
+      toast(cat.nom+': grabando… pulsa otra vez (o la misma tecla) para acabar.');
+      pintarTimeline();
+      guardar();
+    }
+    return;
+  }
+
+  const ev = nuevoEvento(cat, Math.max(0,t-cat.pre), t+cat.post, t);
   estado.eventos.push(ev);
   estado.eventos.sort((a,b)=>a.t_mark-b.t_mark);
 
@@ -547,6 +601,10 @@ function parpadeo(catId){
   b.classList.add('flash');
   setTimeout(()=>b.classList.remove('flash'),180);
 }
+function marcarGrabando(catId,activo){
+  const b=document.querySelector('.cat[data-cat="'+catId+'"]');
+  if(b) b.classList.toggle('grabando',activo);
+}
 
 // Asignación en dos pasos: el vídeo NO se para, se asigna sobre la marcha.
 let tempRapida=null;
@@ -556,6 +614,8 @@ function abrirRapida(ev,cat){
   const plantilla = ev.equipo==='propio'? estado.plantillaPropia : estado.plantillaRival;
   document.getElementById('rapidaTitulo').textContent =
     cat.nom+' · '+(ev.equipo==='propio'?'propio':'rival')+' · '+tc(ev.t_mark);
+
+  pintarAjuste(ev);
 
   const cd=document.getElementById('rapidaDorsales');
   cd.innerHTML='';
@@ -591,6 +651,32 @@ function abrirRapida(ev,cat){
   tempRapida=setTimeout(()=>{ caja.classList.remove('abierta'); estado.pendiente=null; },12000);
 }
 
+// Ajuste fino de t_in/t_out: se usa tanto desde el panel de asignación rápida
+// (justo tras marcar) como desde la lista de Eventos (en cualquier momento después).
+function pintarAjuste(ev){
+  const cont=document.getElementById('rapidaAjuste');
+  if(!cont) return;
+  cont.innerHTML = `
+    <div class="ajuste-fila"><span>Inicio ${tc(ev.t_in)}</span><span>
+      <button class="btn" onclick="ajustarTiempo('${ev.id}','t_in',-1,true)">−1s</button>
+      <button class="btn" onclick="ajustarTiempo('${ev.id}','t_in',1,true)">+1s</button></span></div>
+    <div class="ajuste-fila"><span>Fin ${tc(ev.t_out)}</span><span>
+      <button class="btn" onclick="ajustarTiempo('${ev.id}','t_out',-1,true)">−1s</button>
+      <button class="btn" onclick="ajustarTiempo('${ev.id}','t_out',1,true)">+1s</button></span></div>`;
+}
+function ajustarTiempo(id,campo,delta,dentroDeRapida){
+  const ev=estado.eventos.find(e=>e.id===id);
+  if(!ev) return;
+  let val=ev[campo]+delta;
+  if(campo==='t_in') val=Math.max(0, Math.min(val, ev.t_out-0.3));
+  else val=Math.max(ev.t_in+0.3, val);
+  ev[campo]=val;
+  guardar();
+  pintarTimeline();
+  if(dentroDeRapida) pintarAjuste(ev);
+  else if(document.getElementById('modal').classList.contains('abierto')) abrirEventos();
+}
+
 /* =====================================================================
    TIMELINE
    ===================================================================== */
@@ -601,7 +687,7 @@ function pintarTimeline(){
   const pxs=estado.pxs;
   const ancho=Math.max(dur*pxs, 400);
 
-  lienzo.style.setProperty('--carriles', CATEGORIAS.length);
+  lienzo.style.setProperty('--carriles', estado.categorias.length);
   lienzo.style.width=ancho+'px';
 
   lienzo.querySelectorAll('.carril,.ev,.tick').forEach(n=>n.remove());
@@ -615,8 +701,9 @@ function pintarTimeline(){
     regla.appendChild(d);
   }
 
-  // carriles por categoría
-  CATEGORIAS.forEach((cat,i)=>{
+  // carriles por categoría (todas, activas o no: los eventos históricos de una
+  // categoría desactivada tienen que seguir viéndose)
+  estado.categorias.forEach((cat,i)=>{
     const c=document.createElement('div');
     c.className='carril'; c.style.top=(20+i*22)+'px';
     const n=document.createElement('span');
@@ -627,11 +714,12 @@ function pintarTimeline(){
 
   // eventos
   estado.eventos.forEach(ev=>{
-    const i=CATEGORIAS.findIndex(c=>c.id===ev.tipo);
+    const i=estado.categorias.findIndex(c=>c.id===ev.tipo);
     if(i<0) return;
-    const cat=CATEGORIAS[i];
+    const cat=estado.categorias[i];
     const d=document.createElement('div');
-    d.className='ev'+(estado.seleccion===ev.id?' sel':'');
+    d.className='ev'+(estado.seleccion===ev.id?' sel':'')+(ev.abierto?' abierta':'');
+    d.dataset.id=ev.id;
     d.style.left=(ev.t_in*pxs)+'px';
     d.style.width=Math.max(4,(ev.t_out-ev.t_in)*pxs)+'px';
     d.style.top=(20+i*22+4)+'px';
@@ -654,7 +742,7 @@ function seleccionar(id){
 }
 
 function etiquetaEvento(ev){
-  const cat=CATEGORIAS.find(c=>c.id===ev.tipo);
+  const cat=estado.categorias.find(c=>c.id===ev.tipo);
   const j=buscarJugador(ev.jugadorRef);
   return [tc(ev.t_mark), cat?cat.nom:ev.tipo, ev.equipo==='propio'?'propio':'rival',
           j?('#'+j.dorsal+(j.nombre?' '+j.nombre:'')):'', ev.resultado||''].filter(Boolean).join(' · ');
@@ -687,6 +775,13 @@ setInterval(()=>{
   if(x < sc.scrollLeft+60 || x > sc.scrollLeft+sc.clientWidth-60){
     sc.scrollLeft = x - sc.clientWidth/2;
   }
+
+  // eventos en curso (modo manual): el bloque crece en directo en la timeline
+  Object.values(estado.enCurso).forEach(ev=>{
+    ev.t_out=t;
+    const el=document.querySelector('.ev[data-id="'+ev.id+'"]');
+    if(el) el.style.width=Math.max(4,(ev.t_out-ev.t_in)*estado.pxs)+'px';
+  });
 },100);
 
 function tc(s){
@@ -714,7 +809,8 @@ function abrirDB(){
 function guardar(){
   if(!db) return;
   try{
-    const datos={partido:estado.partido, plantillaPropia:estado.plantillaPropia,
+    const datos={partido:estado.partido, categorias:estado.categorias,
+      plantillaPropia:estado.plantillaPropia,
       plantillaRival:estado.plantillaRival, eventos:estado.eventos};
     db.transaction('proyectos','readwrite').objectStore('proyectos').put(datos,'actual');
   }catch(e){}
@@ -732,8 +828,8 @@ function cargar(){
 
 function exportarJSON(){
   const datos={
-    version:1, exportado:new Date().toISOString(),
-    partido:estado.partido, plantillaPropia:estado.plantillaPropia,
+    version:2, exportado:new Date().toISOString(),
+    partido:estado.partido, categorias:estado.categorias, plantillaPropia:estado.plantillaPropia,
     plantillaRival:estado.plantillaRival, eventos:estado.eventos
   };
   const blob=new Blob([JSON.stringify(datos,null,2)],{type:'application/json'});
@@ -849,7 +945,7 @@ function abrirEventos(){
   }
   const esLocal = Reproductor.tipo==='local';
   const filas = estado.eventos.map(ev=>{
-    const cat=CATEGORIAS.find(c=>c.id===ev.tipo);
+    const cat=estado.categorias.find(c=>c.id===ev.tipo) || {nom:ev.tipo,color:'#7E8CA0'};
     const j=buscarJugador(ev.jugadorRef);
     return `<tr>
       <td><input type="checkbox" class="chk-export" data-id="${ev.id}" ${esLocal?'checked':'disabled'}></td>
@@ -858,7 +954,15 @@ function abrirEventos(){
       <td>${ev.equipo==='propio'?'Propio':'Rival'}</td>
       <td>${j? '#'+j.dorsal+(j.nombre?' '+j.nombre:'') : '<span style="color:var(--muted)">sin asignar</span>'}</td>
       <td>${ev.resultado||'—'}</td>
-      <td class="tc" style="color:var(--muted)">${tc(ev.t_in)}–${tc(ev.t_out)}</td>
+      <td class="tc" style="color:var(--muted);white-space:nowrap;font-size:10px">
+        <button class="btn" style="padding:0 4px" onclick="ajustarTiempo('${ev.id}','t_in',-1)">−</button>
+        ${tc(ev.t_in)}
+        <button class="btn" style="padding:0 4px" onclick="ajustarTiempo('${ev.id}','t_in',1)">+</button>
+        –
+        <button class="btn" style="padding:0 4px" onclick="ajustarTiempo('${ev.id}','t_out',-1)">−</button>
+        ${tc(ev.t_out)}
+        <button class="btn" style="padding:0 4px" onclick="ajustarTiempo('${ev.id}','t_out',1)">+</button>
+      </td>
       <td style="text-align:right;white-space:nowrap">
         <button class="btn" style="padding:2px 6px" onclick="irA(${ev.t_in})">Ver</button>
         <button class="btn" style="padding:2px 6px" onclick="descargarClipUnico('${ev.id}')" ${esLocal?'':'disabled'}>Descargar</button>
@@ -900,8 +1004,8 @@ function abrirEventos(){
       <p style="color:var(--muted);font-size:11px;margin-top:6px">Genera todos los clips de golpe en segundos,
         pero necesita FFmpeg instalado y ejecutar el script manualmente.</p>
     </details>
-    <table class="tabla"><thead><tr><th></th><th>Min</th><th>Categoría</th><th>Equipo</th><th>Jugador</th>
-     <th>Resultado</th><th>Clip</th><th></th></tr></thead><tbody>${filas}</tbody></table>`);
+    <div style="overflow-x:auto"><table class="tabla"><thead><tr><th></th><th>Min</th><th>Categoría</th><th>Equipo</th><th>Jugador</th>
+     <th>Resultado</th><th>Clip</th><th></th></tr></thead><tbody>${filas}</tbody></table></div>`);
 }
 function irA(t){ cerrarModal(); Reproductor.ir(t); Reproductor.play(); }
 function borrarEvento(id){
@@ -925,7 +1029,7 @@ function limpiarNombre(s){
 }
 
 function nombreClip(ev,indice){
-  const cat=CATEGORIAS.find(c=>c.id===ev.tipo);
+  const cat=estado.categorias.find(c=>c.id===ev.tipo);
   const j=buscarJugador(ev.jugadorRef);
   const partes=[String(indice).padStart(3,'0'), cat?cat.id:ev.tipo, ev.equipo,
     j?('d'+limpiarNombre(j.dorsal)):null, ev.resultado?limpiarNombre(ev.resultado):null,
@@ -1066,7 +1170,7 @@ async function capturarClip(ev){
 function abrirExportOverlay(){ document.getElementById('modalExport').classList.add('abierto'); }
 function cerrarExportOverlay(){ document.getElementById('modalExport').classList.remove('abierto'); }
 function actualizarExportOverlay(actual,total,ev){
-  const cat=CATEGORIAS.find(c=>c.id===ev.tipo);
+  const cat=estado.categorias.find(c=>c.id===ev.tipo);
   document.getElementById('expTitulo').textContent='Exportando clip '+actual+' de '+total+' · '+(cat?cat.nom:ev.tipo);
   document.getElementById('expBarra').max=total;
   document.getElementById('expBarra').value=actual-1;
@@ -1128,11 +1232,14 @@ async function descargarClipsDirecto(){
    cada vez que se abre o se cambia el filtro de periodo.
    ===================================================================== */
 
+function catsActivas(){ return estado.categorias.filter(c=>c.activa!==false); }
+function catsEnStats(){ return estado.categorias.filter(c=>c.stats!==false); }
+
 function statsPorCategoria(eventos){
   const out={};
-  CATEGORIAS.forEach(c=>out[c.id]={total:0, resultados:{}});
+  catsEnStats().forEach(c=>out[c.id]={total:0, resultados:{}});
   eventos.forEach(ev=>{
-    const c=out[ev.tipo]; if(!c) return;
+    const c=out[ev.tipo]; if(!c) return; // categoría excluida de estadísticas: no cuenta
     c.total++;
     if(ev.resultado) c.resultados[ev.resultado]=(c.resultados[ev.resultado]||0)+1;
   });
@@ -1175,7 +1282,10 @@ function renderEstadisticas(parte){
   const stP = statsPorCategoria(propio), stR = statsPorCategoria(rival);
   const nomPropio = estado.partido.equipoPropio||'Propio', nomRival = estado.partido.equipoRival||'Rival';
 
-  const filasEquipo = CATEGORIAS.map(c=>{
+  const catsStats = catsEnStats();
+  const idsStats = new Set(catsStats.map(c=>c.id));
+
+  const filasEquipo = catsStats.map(c=>{
     const dp=stP[c.id], dr=stR[c.id];
     return `<tr>
       <td><span class="pill" style="background:${c.color}22;color:${c.color}">${c.nom}</span></td>
@@ -1187,20 +1297,21 @@ function renderEstadisticas(parte){
   }).join('');
 
   const grupos = Array.from(agruparPorJugador(eventos).values())
-    .sort((a,b)=>b.eventos.length-a.eventos.length);
+    .map(g=>({...g, totalStats: g.eventos.filter(e=>idsStats.has(e.tipo)).length}))
+    .sort((a,b)=>b.totalStats-a.totalStats);
 
-  const filasJugadores = grupos.map(g=>{
+  const filasJugadores = catsStats.length? grupos.map(g=>{
     const st = statsPorCategoria(g.eventos);
-    const celdas = CATEGORIAS.map(c=>{
+    const celdas = catsStats.map(c=>{
       const d=st[c.id];
       const titulo=(desgloseTexto(d)||c.nom).replace(/"/g,'&quot;');
       return `<td class="tc" title="${titulo}">${d.total||'—'}</td>`;
     }).join('');
     return `<tr><td>${nombreGrupo(g)}</td><td>${g.equipo==='propio'?'Propio':'Rival'}</td>${celdas}
-      <td class="tc" style="color:var(--muted)">${g.eventos.length}</td></tr>`;
-  }).join('');
+      <td class="tc" style="color:var(--muted)">${g.totalStats}</td></tr>`;
+  }).join('') : '';
 
-  const cabecerasCat = CATEGORIAS.map(c=>`<th title="${c.nom}">${c.corto}</th>`).join('');
+  const cabecerasCat = catsStats.map(c=>`<th title="${c.nom}">${c.corto}</th>`).join('');
 
   modal('Estadísticas · '+(parte==='todo'?'Todo el partido':parte+'ª parte'), `
     <div class="fila-form" style="margin-bottom:14px">
@@ -1223,7 +1334,9 @@ function renderEstadisticas(parte){
 
     <h3 style="font-size:10px;letter-spacing:.15em;text-transform:uppercase;color:var(--muted);margin-bottom:9px">
       Por jugador</h3>
-    ${grupos.length? `<div style="overflow-x:auto"><table class="tabla">
+    ${!catsStats.length? '<p style="color:var(--muted);font-size:11px">No hay ninguna categoría marcada '+
+      'para aparecer en Estadísticas. Actívalo desde "Categorías".</p>'
+    : grupos.length? `<div style="overflow-x:auto"><table class="tabla">
       <thead><tr><th>Jugador</th><th>Equipo</th>${cabecerasCat}<th>Total</th></tr></thead>
       <tbody>${filasJugadores}</tbody></table></div>`
     : '<p style="color:var(--muted);font-size:11px">No hay eventos en este periodo.</p>'}
@@ -1232,12 +1345,15 @@ function renderEstadisticas(parte){
 
 function exportarEstadisticasCSV(parte){
   const eventos = eventosPorParte(estado.eventos, parte);
+  const catsStats = catsEnStats();
+  const idsStats = new Set(catsStats.map(c=>c.id));
   const grupos = Array.from(agruparPorJugador(eventos).values());
-  const filas = [['Jugador','Equipo',...CATEGORIAS.map(c=>c.nom),'Total']];
+  const filas = [['Jugador','Equipo',...catsStats.map(c=>c.nom),'Total']];
   grupos.forEach(g=>{
     const st = statsPorCategoria(g.eventos);
+    const total = g.eventos.filter(e=>idsStats.has(e.tipo)).length;
     filas.push([nombreGrupo(g), g.equipo==='propio'?'Propio':'Rival',
-      ...CATEGORIAS.map(c=>st[c.id].total), g.eventos.length]);
+      ...catsStats.map(c=>st[c.id].total), total]);
   });
   const csv = filas.map(f=>f.map(v=>{
     const s=String(v);
@@ -1251,8 +1367,125 @@ function exportarEstadisticasCSV(parte){
   toast('Estadísticas exportadas a CSV.');
 }
 
+/* =====================================================================
+   GESTIÓN DE CATEGORÍAS
+   Editables en directo: añadir, editar, y activar/desactivar (nunca se
+   borran de verdad, para no perder el significado de eventos ya marcados
+   con ellas). "stats" controla si cuentan en la tabla de Estadísticas;
+   una categoría con stats:false sigue funcionando para marcar vídeo, solo
+   que no aparece en los informes.
+   ===================================================================== */
+
+function idUnicoCategoria(nombre){
+  const base = limpiarNombre(nombre).toLowerCase() || 'cat';
+  let id=base, n=2;
+  while(estado.categorias.some(c=>c.id===id)){ id=base+'_'+n; n++; }
+  return id;
+}
+
+let editandoCategoria=null;
+function abrirCategorias(){
+  editandoCategoria=null;
+  renderCategorias();
+}
+
+function renderCategorias(){
+  const editando = editandoCategoria? estado.categorias.find(c=>c.id===editandoCategoria) : null;
+
+  const filas = estado.categorias.map(c=>`<tr${c.activa===false?' style="opacity:.5"':''}>
+    <td><span class="pill" style="background:${c.color}22;color:${c.color}">${c.nom}</span></td>
+    <td class="tc">${c.tecla}</td>
+    <td>${c.modo==='manual'?'Manual (activar/parar)':'Auto ('+(c.pre||0)+'s / '+(c.post||0)+'s)'}</td>
+    <td>${c.stats===false?'No':'Sí'}</td>
+    <td>${c.activa===false?'Inactiva':'Activa'}</td>
+    <td style="text-align:right;white-space:nowrap">
+      <button class="btn" style="padding:2px 8px" onclick="editandoCategoria='${c.id}';renderCategorias()">Editar</button>
+      <button class="btn" style="padding:2px 8px" onclick="toggleActivaCategoria('${c.id}')">${c.activa===false?'Activar':'Desactivar'}</button>
+    </td>
+  </tr>`).join('');
+
+  modal('Categorías', `
+    <div class="aviso">Las categorías controlan qué botones/teclas ves para marcar vídeo y qué aparece luego
+    en Estadísticas. Desactivar una categoría la quita del panel de marcaje y libera su tecla, pero conserva
+    los eventos ya grabados con ella — no se borra nada. Quita la marca de "Incluir en Estadísticas" para
+    categorías que solo quieres usar para generar clips de vídeo, sin que ensucien las tablas de números.</div>
+    <div style="overflow-x:auto"><table class="tabla" style="margin-bottom:16px">
+      <thead><tr><th>Nombre</th><th>Tecla</th><th>Modo</th><th>En estadísticas</th><th>Estado</th><th></th></tr></thead>
+      <tbody>${filas}</tbody>
+    </table></div>
+    <h3 style="font-family:var(--display);font-size:16px;text-transform:uppercase;letter-spacing:.05em;margin-bottom:10px">
+      ${editando? 'Editar categoría · '+editando.nom : 'Añadir categoría'}</h3>
+    <div class="fila-form">
+      <div class="campo"><label>Nombre</label><input id="cNombre" value="${editando?editando.nom:''}" style="width:170px"></div>
+      <div class="campo"><label>Tecla</label><input id="cTecla" maxlength="1" value="${editando?editando.tecla:''}" style="width:44px;text-align:center"></div>
+      <div class="campo"><label>Color</label><input id="cColor" type="color" value="${editando?editando.color:'#5D7DD6'}" style="width:44px;padding:2px"></div>
+      <div class="campo"><label>Modo</label>
+        <select id="cModo" onchange="document.getElementById('cRoll').style.display=this.value==='manual'?'none':'flex'">
+          <option value="auto" ${!editando||editando.modo!=='manual'?'selected':''}>Automático (pre/post fijo)</option>
+          <option value="manual" ${editando&&editando.modo==='manual'?'selected':''}>Manual (pulsar para empezar/acabar)</option>
+        </select>
+      </div>
+    </div>
+    <div class="fila-form" id="cRoll" style="display:${editando&&editando.modo==='manual'?'none':'flex'}">
+      <div class="campo"><label>Pre-roll (s)</label><input id="cPre" type="number" min="0" step="0.5" value="${editando?editando.pre:5}" style="width:64px"></div>
+      <div class="campo"><label>Post-roll (s)</label><input id="cPost" type="number" min="0" step="0.5" value="${editando?editando.post:5}" style="width:64px"></div>
+      <p style="color:var(--muted);font-size:10px;max-width:260px;align-self:flex-end;margin-bottom:6px">
+        En modo manual se usan como colchón extra al principio/final del tramo que marques a mano.</p>
+    </div>
+    <div class="fila-form">
+      <div class="campo" style="flex:1;min-width:240px"><label>Resultados (opcional, separados por coma)</label>
+        <input id="cResultados" value="${editando?editando.resultados.join(', '):''}" placeholder="ej. A puerta, Fuera, Bloqueado" style="width:100%"></div>
+    </div>
+    <div class="fila-form">
+      <label style="display:flex;align-items:center;gap:6px;font-size:12px">
+        <input type="checkbox" id="cStats" ${!editando||editando.stats!==false?'checked':''}> Incluir en Estadísticas
+      </label>
+      <button class="btn btn-rojo" onclick="guardarCategoria()">${editando?'Guardar cambios':'Añadir categoría'}</button>
+      ${editando?'<button class="btn" onclick="editandoCategoria=null;renderCategorias()">Cancelar</button>':''}
+    </div>
+  `);
+}
+
+function guardarCategoria(){
+  const nom = document.getElementById('cNombre').value.trim();
+  const tecla = document.getElementById('cTecla').value.trim();
+  const color = document.getElementById('cColor').value;
+  const modo = document.getElementById('cModo').value;
+  const pre = Math.max(0, parseFloat(document.getElementById('cPre').value)||0);
+  const post = Math.max(0, parseFloat(document.getElementById('cPost').value)||0);
+  const resultados = document.getElementById('cResultados').value.split(',').map(s=>s.trim()).filter(Boolean);
+  const stats = document.getElementById('cStats').checked;
+
+  if(!nom){ toast('Ponle un nombre a la categoría.'); return; }
+  if(tecla.length!==1){ toast('La tecla debe ser un solo carácter.'); return; }
+  const RESERVADAS=[' ','Tab','Escape',',','.'];
+  if(RESERVADAS.includes(tecla)){ toast('Esa tecla ya se usa para otra acción (reproducir, cambiar equipo…).'); return; }
+  const colision = estado.categorias.find(c=>c.tecla===tecla && c.activa!==false && c.id!==editandoCategoria);
+  if(colision){ toast('La tecla "'+tecla+'" ya la usa "'+colision.nom+'".'); return; }
+
+  const corto = nom.length>7? nom.slice(0,6)+'.' : nom;
+
+  if(editandoCategoria){
+    const c = estado.categorias.find(c=>c.id===editandoCategoria);
+    Object.assign(c,{nom,corto,tecla,color,modo,pre,post,resultados,stats});
+  } else {
+    estado.categorias.push({id:idUnicoCategoria(nom), nom, corto, tecla, color, pre, post, modo,
+      resultados, stats, activa:true});
+  }
+  editandoCategoria=null;
+  guardar(); renderPanelCategorias(); renderCategorias();
+  toast('Categoría guardada.');
+}
+
+function toggleActivaCategoria(id){
+  const c=estado.categorias.find(c=>c.id===id);
+  if(!c) return;
+  c.activa = c.activa===false? true : false;
+  guardar(); renderPanelCategorias(); renderCategorias();
+}
+
 function abrirAyuda(){
-  const cats=CATEGORIAS.map(c=>`<div class="atajo"><kbd>${c.tecla}</kbd> ${c.nom}</div>`).join('');
+  const cats=catsActivas().map(c=>`<div class="atajo"><kbd>${c.tecla}</kbd> ${c.nom}${c.modo==='manual'?' (activar/parar)':''}</div>`).join('');
   modal('Atajos de teclado', `
     <h3 style="font-size:10px;letter-spacing:.15em;text-transform:uppercase;color:var(--muted);margin-bottom:9px">
       Marcaje</h3>
@@ -1285,16 +1518,21 @@ function botonPlay(){
   document.getElementById('btnPlay').textContent = Reproductor.reproduciendo()?'❚❚':'▶';
 }
 
-// panel de categorías
-const cont=document.getElementById('cats');
-CATEGORIAS.forEach(c=>{
-  const b=document.createElement('button');
-  b.className='cat'; b.dataset.cat=c.id;
-  b.innerHTML=`<span class="franja" style="background:${c.color}"></span>
-    <span class="tecla">${c.tecla}</span><b>${c.nom}</b><i>−${c.pre}s / +${c.post}s</i>`;
-  b.onclick=()=>marcar(c.id);
-  cont.appendChild(b);
-});
+// panel de categorías: se repinta al arrancar y cada vez que se editan
+// categorías desde el modal "Categorías" (añadir/editar/activar/desactivar).
+function renderPanelCategorias(){
+  const cont=document.getElementById('cats');
+  cont.innerHTML='';
+  catsActivas().forEach(c=>{
+    const b=document.createElement('button');
+    b.className='cat'; b.dataset.cat=c.id;
+    b.innerHTML=`<span class="franja" style="background:${c.color}"></span>
+      <span class="tecla">${c.tecla}</span><b>${c.nom}</b>
+      <i>${c.modo==='manual'? 'activar / parar' : '−'+c.pre+'s / +'+c.post+'s'}</i>`;
+    b.onclick=()=>marcar(c.id);
+    cont.appendChild(b);
+  });
+}
 
 // fuente de vídeo
 const drop=document.getElementById('drop');
@@ -1350,6 +1588,7 @@ document.getElementById('btnT0').onclick=()=>{
 // barra superior
 document.getElementById('btnPartido').onclick=abrirPartido;
 document.getElementById('btnPlantillas').onclick=abrirPlantillas;
+document.getElementById('btnCategorias').onclick=abrirCategorias;
 document.getElementById('btnEventos').onclick=abrirEventos;
 document.getElementById('btnStats').onclick=abrirEstadisticas;
 document.getElementById('btnAyuda').onclick=abrirAyuda;
@@ -1366,10 +1605,12 @@ document.getElementById('ficheroJson').onchange=e=>{
     try{
       const d=JSON.parse(r.result);
       estado.partido=d.partido||estado.partido;
+      estado.categorias=(d.categorias&&d.categorias.length)? d.categorias : estado.categorias;
       estado.plantillaPropia=d.plantillaPropia||[];
       estado.plantillaRival=d.plantillaRival||[];
       estado.eventos=d.eventos||[];
-      guardar(); pintarTimeline();
+      estado.enCurso={};
+      guardar(); renderPanelCategorias(); pintarTimeline();
       toast('Proyecto importado · '+estado.eventos.length+' eventos. Vuelve a cargar el vídeo.');
     }catch(err){ toast('Ese archivo no tiene el formato esperado.'); }
   };
@@ -1394,7 +1635,7 @@ document.addEventListener('keydown',e=>{
   if(e.key==='Escape'){ cerrarModal(); return; }
   if(document.getElementById('modal').classList.contains('abierto')) return;
 
-  const cat=CATEGORIAS.find(c=>c.tecla===e.key);
+  const cat=catsActivas().find(c=>c.tecla===e.key);
   if(cat){ e.preventDefault(); marcar(cat.id); return; }
 
   switch(e.key){
@@ -1413,11 +1654,13 @@ document.addEventListener('keydown',e=>{
   const d=await cargar();
   if(d && d.eventos && d.eventos.length){
     estado.partido=d.partido||estado.partido;
+    estado.categorias=(d.categorias&&d.categorias.length)? d.categorias : estado.categorias;
     estado.plantillaPropia=d.plantillaPropia||[];
     estado.plantillaRival=d.plantillaRival||[];
     estado.eventos=d.eventos||[];
     toast('Sesión anterior recuperada · '+estado.eventos.length+' eventos. Carga el vídeo otra vez.');
   }
+  renderPanelCategorias();
   pintarTimeline();
 })();
 </script>
