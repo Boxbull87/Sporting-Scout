@@ -1039,11 +1039,21 @@ function resetReproductor(){
   intentarReconectarVideo();
 }
 
-// Si este proyecto tiene un FileSystemFileHandle guardado (Chrome/Edge, ver btnReconectar
-// más abajo), lo muestra en la pantalla de carga. Si el navegador todavía tiene permiso de
-// lectura concedido, lo abre solo, sin pedir nada; si no, deja el botón listo para un clic.
+// Reabre automáticamente el vídeo del proyecto al recuperarlo. Dos casos:
+// - YouTube: el id ya está guardado en refVideo, no hace falta permiso ninguno,
+//   así que se recarga solo sin mostrar nada.
+// - Local (Chrome/Edge): si hay un FileSystemFileHandle guardado, se muestra el
+//   bloque de "vídeo guardado"; si el navegador todavía tiene permiso de lectura
+//   concedido se abre solo, si no, deja el botón listo para un clic.
 async function intentarReconectarVideo(){
   const bloque=document.getElementById('reconectarVideo');
+
+  if(estado.partido.fuenteVideo==='youtube' && estado.partido.refVideo){
+    bloque.classList.add('hidden');
+    Reproductor.cargarYoutube(estado.partido.refVideo);
+    return;
+  }
+
   const handle=estado.partido.videoHandle;
   if(!handle || estado.partido.fuenteVideo!=='local' || !window.showOpenFilePicker){
     bloque.classList.add('hidden');
