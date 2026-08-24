@@ -305,6 +305,10 @@ input:focus,select:focus,button:focus-visible{outline:2px solid var(--rojo);outl
       <div class="fuente" id="fuente">
         <h2>Carga el partido</h2>
         <p>Trabaja con un archivo local si vas a exportar clips, o con YouTube si solo vas a marcar estadísticas.</p>
+        <div class="drop hidden" id="reconectarVideo" style="border-color:var(--rojo)">
+          🎬 Vídeo guardado de este proyecto: <b id="reconectarNombre"></b><br>
+          <button class="btn btn-rojo" id="btnReconectar" style="margin-top:8px">Abrir vídeo guardado</button>
+        </div>
         <div class="drop" id="drop">Arrastra el vídeo aquí o pulsa para elegir archivo</div>
         <div class="fuente-fila">
           <input type="text" id="ytUrl" placeholder="…o pega una URL de YouTube" style="width:290px">
@@ -482,8 +486,11 @@ const Reproductor = {
   tipo:null, vid:null, yt:null, ytListo:false,
   _ytT:0, _ytStamp:0, _ytPlay:false,
 
-  cargarLocal(file){
+  // handle: FileSystemFileHandle opcional (solo Chrome/Edge). Si se pasa, se guarda en el
+  // proyecto para poder reabrir este mismo archivo sin volver a buscarlo la próxima vez.
+  cargarLocal(file, handle){
     const v = document.getElementById('vidLocal');
+    if(v.src && v.src.startsWith('blob:')) URL.revokeObjectURL(v.src);
     v.src = URL.createObjectURL(file);
     v.style.display='block';
     document.getElementById('ytHost').style.display='none';
@@ -491,6 +498,7 @@ const Reproductor = {
     this.tipo='local'; this.vid=v; this.yt=null;
     estado.partido.fuenteVideo='local';
     estado.partido.refVideo=file.name;
+    if(handle) estado.partido.videoHandle=handle;
     document.getElementById('estadoFuente').textContent='Archivo local · '+file.name;
     v.onloadedmetadata=()=>{ pintarTimeline(); };
     toast('Vídeo cargado. Puedes marcar y exportar clips.');
@@ -1028,6 +1036,39 @@ function resetReproductor(){
   document.getElementById('estadoFuente').textContent='';
   Reproductor.tipo=null; Reproductor.vid=null; Reproductor.yt=null; Reproductor.ytListo=false;
   botonPlay();
+  intentarReconectarVideo();
+}
+
+// Si este proyecto tiene un FileSystemFileHandle guardado (Chrome/Edge, ver btnReconectar
+// más abajo), lo muestra en la pantalla de carga. Si el navegador todavía tiene permiso de
+// lectura concedido, lo abre solo, sin pedir nada; si no, deja el botón listo para un clic.
+async function intentarReconectarVideo(){
+  const bloque=document.getElementById('reconectarVideo');
+  const handle=estado.partido.videoHandle;
+  if(!handle || estado.partido.fuenteVideo!=='local' || !window.showOpenFilePicker){
+    bloque.classList.add('hidden');
+    return;
+  }
+  document.getElementById('reconectarNombre').textContent=estado.partido.refVideo||'(archivo local)';
+  bloque.classList.remove('hidden');
+  try{
+    if(await handle.queryPermission({mode:'read'})==='granted'){
+      Reproductor.cargarLocal(await handle.getFile(), handle);
+    }
+  }catch(e){ /* el archivo pudo moverse o borrarse: se queda el botón para reintentar a mano */ }
+}
+async function reconectarVideoDesdeForm(){
+  const handle=estado.partido.videoHandle;
+  if(!handle) return;
+  try{
+    if(await handle.requestPermission({mode:'read'})==='granted'){
+      Reproductor.cargarLocal(await handle.getFile(), handle);
+    } else {
+      toast('No se concedió permiso para abrir el vídeo.');
+    }
+  }catch(e){
+    toast('No se pudo reconectar (¿se movió o se borró el archivo?). Cárgalo de nuevo abajo.');
+  }
 }
 
 // mantenerPropia: conserva la plantilla propia actual (tu equipo no cambia
@@ -1050,9 +1091,13 @@ function nuevoProyecto(mantenerPropia){
 }
 
 function exportarJSON(){
+  // El handle del vídeo (FileSystemFileHandle) no es serializable a JSON ni tiene sentido
+  // fuera de este navegador, así que se excluye del archivo exportado.
+  const partidoExport={...estado.partido};
+  delete partidoExport.videoHandle;
   const datos={
     version:2, exportado:new Date().toISOString(),
-    partido:estado.partido, categorias:todasLasCategorias(), plantillaPropia:estado.plantillaPropia,
+    partido:partidoExport, categorias:todasLasCategorias(), plantillaPropia:estado.plantillaPropia,
     plantillaRival:estado.plantillaRival, eventos:estado.eventos
   };
   const blob=new Blob([JSON.stringify(datos,null,2)],{type:'application/json'});
@@ -1332,7 +1377,7 @@ async function abrirProyectoDesdeForm(id){
   renderPanelCategorias();
   pintarTimeline();
   cerrarModal();
-  toast('Proyecto abierto · '+estado.eventos.length+' eventos. Carga el vídeo otra vez.');
+  toast('Proyecto abierto · '+estado.eventos.length+' eventos.');
 }
 async function borrarProyectoDesdeForm(id){
   if(!confirm('¿Borrar este proyecto? Esta acción no se puede deshacer.')) return;
@@ -2280,7 +2325,21 @@ function cambiarPanel(id){
 
 // fuente de vídeo
 const drop=document.getElementById('drop');
-drop.onclick=()=>document.getElementById('ficheroVideo').click();
+const soportaFS = typeof window.showOpenFilePicker === 'function';
+drop.onclick=async ()=>{
+  if(soportaFS){
+    try{
+      const [handle] = await window.showOpenFilePicker({types:[{description:'Vídeo',
+        accept:{'video/*':['.mp4','.mov','.mkv','.avi','.webm','.m4v']}}]});
+      Reproductor.cargarLocal(await handle.getFile(), handle);
+      return;
+    }catch(err){
+      if(err.name==='AbortError') return; // el usuario cerró el diálogo sin elegir nada
+      // si algo raro pasa con la File System Access API, seguimos con el <input> normal
+    }
+  }
+  document.getElementById('ficheroVideo').click();
+};
 document.getElementById('ficheroVideo').onchange=e=>{
   if(e.target.files[0]) Reproductor.cargarLocal(e.target.files[0]);
 };
@@ -2290,13 +2349,22 @@ document.getElementById('ficheroVideo').onchange=e=>{
 ['dragleave','drop'].forEach(n=>drop.addEventListener(n,e=>{
   e.preventDefault(); drop.classList.remove('activo');
 }));
-drop.addEventListener('drop',e=>{
+drop.addEventListener('drop',async e=>{
   const f=e.dataTransfer.files[0];
-  if(f && f.type.startsWith('video')) Reproductor.cargarLocal(f);
+  if(!f || !f.type.startsWith('video')) return;
+  const item = e.dataTransfer.items && e.dataTransfer.items[0];
+  if(soportaFS && item && item.getAsFileSystemHandle){
+    try{
+      const handle = await item.getAsFileSystemHandle();
+      if(handle && handle.kind==='file'){ Reproductor.cargarLocal(f, handle); return; }
+    }catch(err){ /* seguimos con el archivo suelto, sin handle que guardar */ }
+  }
+  Reproductor.cargarLocal(f);
 });
 document.getElementById('btnYt').onclick=()=>{
   Reproductor.cargarYoutube(document.getElementById('ytUrl').value);
 };
+document.getElementById('btnReconectar').onclick=reconectarVideoDesdeForm;
 
 // transporte
 document.getElementById('btnPlay').onclick=()=>{ Reproductor.alternar(); setTimeout(botonPlay,60); };
@@ -2437,8 +2505,9 @@ async function arrancarApp(){
     if(p){
       aplicarProyecto(cfg.ultimoProyectoId, p);
       if(estado.eventos.length){
-        toast('Proyecto recuperado · '+estado.eventos.length+' eventos. Carga el vídeo otra vez.');
+        toast('Proyecto recuperado · '+estado.eventos.length+' eventos.');
       }
+      intentarReconectarVideo();
     }
   }
   renderSelectorPanel();
