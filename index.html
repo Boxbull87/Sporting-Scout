@@ -934,8 +934,11 @@ function capturarRecorteMarcador(){
   const cv=document.createElement('canvas');
   cv.width=sw*factor; cv.height=sh*factor;
   const ctx=cv.getContext('2d');
-  ctx.imageSmoothingEnabled=true;
-  ctx.imageSmoothingQuality='high';
+  // Sin suavizado: agrandar "a bloques" (cada píxel original se repite tal
+  // cual) en vez de difuminar. El suavizado emborrona el hueco fino entre
+  // dígitos pegados y lo rellena de gris, lo que después el umbral cuenta
+  // como trazo — fundiendo dígitos vecinos en un solo bloque.
+  ctx.imageSmoothingEnabled=false;
   ctx.drawImage(video, sx,sy,sw,sh, 0,0,cv.width,cv.height);
   const img=ctx.getImageData(0,0,cv.width,cv.height);
   const d=img.data;
@@ -1043,7 +1046,7 @@ function normalizarBloque(cvOrigen, b){
   const cv=document.createElement('canvas');
   cv.width=PLANTILLA_ANCHO; cv.height=PLANTILLA_ALTO;
   const ctx=cv.getContext('2d');
-  ctx.imageSmoothingEnabled=true;
+  ctx.imageSmoothingEnabled=false; // igual que en capturarRecorteMarcador: nada de difuminar bordes binarios
   ctx.drawImage(cvOrigen, b.x0, b.y0, b.x1-b.x0+1, b.y1-b.y0+1, 0, 0, PLANTILLA_ANCHO, PLANTILLA_ALTO);
   const datos=ctx.getImageData(0,0,PLANTILLA_ANCHO,PLANTILLA_ALTO).data;
   let bits='';
@@ -1156,6 +1159,10 @@ function renderCalibrarDigitos(){
   }).join(' ');
 
   modal('Calibrar dígitos del marcador', `
+    <p style="color:var(--muted);font-size:11px;margin-bottom:6px">El recuadro completo tal cual se ha leído —
+      si aquí ya se ven los dígitos pegados/mezclados, el problema está en el recorte, no en las plantillas.</p>
+    <img src="${cvCalibrando.toDataURL()}" style="max-width:100%;border:1px solid var(--line);border-radius:4px;
+      image-rendering:pixelated;margin-bottom:14px;background:#000">
     <p style="color:var(--muted);font-size:11px;margin-bottom:10px">
       Escribe qué número es cada recorte de abajo (déjalo en blanco para ignorarlo). Repite esto en varios
       momentos del vídeo hasta cubrir los 10 dígitos — cuantos más ejemplos guardes por dígito, mejor reconoce.</p>
@@ -1383,9 +1390,14 @@ function mostrarDiagnosticoPlantillas(cv, tVideo){
   }).join('');
 
   modal('Diagnóstico de plantillas', `
-    <p style="color:var(--muted);font-size:11px;margin-bottom:10px">Cada recorte que se ha detectado en este
-      momento, con el número que más se le parece de tus plantillas y el % de parecido. En verde, los que llegan
-      al ${Math.round(UMBRAL_CONFIANZA_PLANTILLA*100)}% que hace falta; en rojo, los que no — a esos les falta
+    <p style="color:var(--muted);font-size:11px;margin-bottom:6px">Esto es el recorte completo, tal cual lo ve
+      (recortado y en blanco/negro) — compáralo con el marcador real para ver si separa bien los dígitos o si
+      sigue mezclándolos.</p>
+    <img src="${cv.toDataURL()}" style="max-width:100%;border:1px solid var(--line);border-radius:4px;
+      image-rendering:pixelated;margin-bottom:14px;background:#000">
+    <p style="color:var(--muted);font-size:11px;margin-bottom:10px">Y aquí cada recorte por separado, con el
+      número que más se le parece de tus plantillas y el % de parecido. En verde, los que llegan al
+      ${Math.round(UMBRAL_CONFIANZA_PLANTILLA*100)}% que hace falta; en rojo, los que no — a esos les falta
       plantilla de ese número, o la plantilla que tienen no se parece lo bastante a este recorte en concreto.</p>
     ${digitos.length? `<div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:14px;justify-content:center">
       ${filas}</div>` : '<p style="color:var(--rojo);font-size:12px;margin-bottom:14px">No se detecta ningún trazo con pinta de dígito en este momento.</p>'}
