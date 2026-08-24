@@ -1499,6 +1499,11 @@ function borrarJugador(tipo,id){
   guardar(); abrirPlantillas();
 }
 
+// Se queda encendido entre aperturas del modal dentro de la misma sesión: si lo activas
+// para exportar, sigue activo si cierras y reabres Eventos mientras sigues en ello.
+let filtroSoloClip = false;
+function toggleFiltroSoloClip(valor){ filtroSoloClip = valor; abrirEventos(); }
+
 function abrirEventos(){
   if(!estado.eventos.length){
     modal('Eventos', '<div class="vacio">Todavía no has marcado nada.<br>'+
@@ -1506,7 +1511,11 @@ function abrirEventos(){
     return;
   }
   const esLocal = Reproductor.tipo==='local';
-  const filas = estado.eventos.map(ev=>{
+  const hayEventosSinClip = estado.eventos.some(ev=>!categoriaGeneraClip(ev.tipo));
+  const eventosVisibles = filtroSoloClip
+    ? estado.eventos.filter(ev=>categoriaGeneraClip(ev.tipo))
+    : estado.eventos;
+  const filas = eventosVisibles.map(ev=>{
     const cat=todasLasCategorias().find(c=>c.id===ev.tipo) || {nom:ev.tipo,color:'#7E8CA0'};
     const puedeClip = esLocal && categoriaGeneraClip(ev.tipo);
     const tituloSinClip = categoriaGeneraClip(ev.tipo)? '' : 'title="Panel solo-estadísticas: sin clip"';
@@ -1538,8 +1547,17 @@ function abrirEventos(){
      exportar clips físicos (YouTube no permite acceder al vídeo). Carga el archivo local del partido para
      activar la exportación.</div>`;
 
-  modal('Eventos · '+estado.eventos.length, `
+  modal('Eventos · '+eventosVisibles.length+(filtroSoloClip&&eventosVisibles.length!==estado.eventos.length? ' de '+estado.eventos.length : ''), `
     ${avisoClips}
+    ${hayEventosSinClip? `
+    <div class="fila-form" style="margin-bottom:6px">
+      <label style="display:flex;align-items:center;gap:6px;font-size:12px">
+        <input type="checkbox" onchange="toggleFiltroSoloClip(this.checked)" ${filtroSoloClip?'checked':''}>
+        Mostrar solo eventos con clip
+      </label>
+      <span style="color:var(--muted);font-size:11px">Oculta los de paneles "solo estadísticas" para
+        encontrar rápido los que sí quieres exportar entre muchos marcados.</span>
+    </div>` : ''}
     <div class="fila-form" style="margin-bottom:6px">
       <button class="btn" onclick="marcarTodosExport(true)" ${esLocal?'':'disabled'}>Marcar todos</button>
       <button class="btn" onclick="marcarTodosExport(false)" ${esLocal?'':'disabled'}>Marcar ninguno</button>
