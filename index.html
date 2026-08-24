@@ -50,6 +50,20 @@ button{font-family:inherit;color:inherit;background:none;border:none;cursor:poin
 input,select{font-family:inherit;font-size:13px;background:var(--panel-2);color:var(--txt);
   border:1px solid var(--line);border-radius:4px;padding:5px 7px}
 input:focus,select:focus,button:focus-visible{outline:2px solid var(--rojo);outline-offset:1px}
+.hidden{display:none!important}
+
+/* ---------- LOGIN / CUENTA PENDIENTE ---------- */
+#appScreen{display:flex;flex-direction:column;height:100%}
+.pantalla{
+  position:fixed;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;
+  gap:16px;background:var(--bg);padding:24px;text-align:center;z-index:80;
+}
+.pantalla h2{font-family:var(--display);font-size:28px;font-weight:700;letter-spacing:.06em;text-transform:uppercase}
+.pantalla h2 span{color:var(--rojo)}
+.pantalla p{color:var(--muted);max-width:340px;line-height:1.5;font-size:12px}
+.caja-login{display:flex;flex-direction:column;gap:9px;width:min(280px,90vw)}
+.caja-login input{width:100%}
+.caja-login .error{color:#F0A0A0;font-size:11px;min-height:14px}
 
 /* ---------- BARRA SUPERIOR ---------- */
 .top{
@@ -243,8 +257,30 @@ input:focus,select:focus,button:focus-visible{outline:2px solid var(--rojo);outl
 </head>
 <body>
 
+<div id="authScreen" class="pantalla">
+  <h2>Scouting<span>·</span>FS</h2>
+  <p>Inicia sesión con tu cuenta de Sporting Entrenamientos para usar la app.
+  Las cuentas se gestionan allí — si no tienes una, créala primero en Sporting.</p>
+  <form class="caja-login" id="formLogin">
+    <input type="email" id="authEmail" placeholder="Email" autocomplete="username" required>
+    <input type="password" id="authPass" placeholder="Contraseña" autocomplete="current-password" required>
+    <button class="btn btn-rojo" type="submit">Entrar</button>
+    <p class="error" id="authError"></p>
+  </form>
+</div>
+
+<div id="pendingScreen" class="pantalla hidden">
+  <h2>Cuenta pendiente</h2>
+  <p id="pendingTexto">Tu cuenta todavía no está activada.</p>
+  <button class="btn" id="btnSalirPending">Cerrar sesión</button>
+</div>
+
+<div id="appScreen" class="hidden">
+
 <div class="top">
-  <div class="marca">Scouting<span>·</span>FS</div>
+  <div class="marca">Scouting<span>·</span>FS
+    <small id="etiquetaCoach" style="display:block;font-family:var(--body);font-size:9px;font-weight:500;
+      letter-spacing:.04em;text-transform:none;color:var(--muted)"></small></div>
   <div class="reloj" id="reloj">00:00<small id="relojEtq">vídeo</small></div>
   <button class="btn" id="btnParte">1ª parte</button>
   <button class="btn" id="btnT0" title="Marca el saque inicial de la parte actual en este punto del vídeo">Fijar saque inicial</button>
@@ -360,6 +396,8 @@ input:focus,select:focus,button:focus-visible{outline:2px solid var(--rojo);outl
 <input type="file" id="ficheroVideo" accept="video/*" style="display:none">
 <input type="file" id="ficheroJson" accept="application/json,.json" style="display:none">
 <div class="toast" id="toast"></div>
+
+</div><!-- /appScreen -->
 
 <script>
 /* =====================================================================
@@ -871,12 +909,12 @@ function exportarJSON(){
 }
 
 /* =====================================================================
-   CONEXIÓN CON SPORTING (Firestore)
-   Mismo proyecto que Sporting Entrenamientos, pero fronteras estrictas:
-   Scouting solo LEE teams/players/matchdays/coaches (nunca escribe ahí) y
-   solo ESCRIBE en sus propias colecciones partidos_scouting/eventos_scouting.
-   La conexión es opcional: la app funciona igual sin iniciar sesión, solo
-   que entonces no hay vínculo con Sporting ni plantilla real que cargar.
+   LOGIN Y CONEXIÓN CON SPORTING (Firestore)
+   Mismo proyecto que Sporting Entrenamientos. Login obligatorio desde el
+   arranque, igual que en Sporting: sin sesión activa no se ve la app.
+   Fronteras estrictas de datos: Scouting solo LEE teams/players/matchdays/
+   coaches (nunca escribe ahí) y solo ESCRIBE en sus propias colecciones
+   partidos_scouting/eventos_scouting.
    ===================================================================== */
 
 firebase.initializeApp(SPORTING_FIREBASE_CONFIG);
@@ -897,32 +935,66 @@ function traducirErrorAuth(err){
   return map[err.code] || err.message;
 }
 
-async function conectarSporting(email,pass){
+function mostrarPantalla(nombre){
+  document.getElementById('authScreen').classList.toggle('hidden', nombre!=='auth');
+  document.getElementById('pendingScreen').classList.toggle('hidden', nombre!=='pending');
+  document.getElementById('appScreen').classList.toggle('hidden', nombre!=='app');
+}
+
+// Única fuente de verdad de qué pantalla se ve: igual que en Sporting, todo
+// pasa por aquí (login inicial, recarga de página con sesión ya guardada,
+// y cierre de sesión).
+sportingAuth.onAuthStateChanged(async (user)=>{
+  const errEl=document.getElementById('authError');
+  if(errEl) errEl.textContent='';
+  if(!user){
+    sporting={uid:null, coach:null, equipos:[], teamId:null, jornadas:[]};
+    mostrarPantalla('auth');
+    return;
+  }
   try{
-    const cred = await sportingAuth.signInWithEmailAndPassword(email,pass);
-    const uid = cred.user.uid;
-    const doc = await sportingDb.collection('coaches').doc(uid).get();
+    const doc = await sportingDb.collection('coaches').doc(user.uid).get();
     if(!doc.exists){
-      await sportingAuth.signOut();
-      return {ok:false, error:'Esta cuenta no está registrada como entrenador en Sporting.'};
+      document.getElementById('pendingTexto').textContent=
+        'Esta cuenta ('+user.email+') no está registrada como entrenador en Sporting Entrenamientos.';
+      mostrarPantalla('pending');
+      return;
     }
     const coach = doc.data();
     if(!coach.active){
-      await sportingAuth.signOut();
-      return {ok:false, error:'Tu cuenta de Sporting todavía no está activada por un gestor.'};
+      document.getElementById('pendingTexto').textContent=
+        'Tu cuenta ('+user.email+') todavía no ha sido activada por un gestor de Sporting.';
+      mostrarPantalla('pending');
+      return;
     }
-    sporting.uid = uid;
+    sporting.uid = user.uid;
     sporting.coach = coach;
     await cargarEquiposSporting();
-    return {ok:true};
+    const etq=document.getElementById('etiquetaCoach');
+    if(etq) etq.textContent=coach.name;
+    mostrarPantalla('app');
+    arrancarApp();
   }catch(err){
-    return {ok:false, error:traducirErrorAuth(err)};
+    mostrarPantalla('auth');
+    if(errEl) errEl.textContent='Error cargando tu perfil: '+err.message;
   }
-}
-function desconectarSporting(){
-  sportingAuth.signOut();
-  sporting = {uid:null, coach:null, equipos:[], teamId:null, jornadas:[]};
-}
+});
+
+document.getElementById('formLogin').onsubmit = async (e)=>{
+  e.preventDefault();
+  const email=document.getElementById('authEmail').value.trim();
+  const pass=document.getElementById('authPass').value;
+  const errEl=document.getElementById('authError');
+  errEl.textContent='';
+  try{
+    await sportingAuth.signInWithEmailAndPassword(email,pass);
+    // onAuthStateChanged se encarga de comprobar el perfil y cambiar de pantalla
+  }catch(err){
+    errEl.textContent=traducirErrorAuth(err);
+  }
+};
+document.getElementById('btnSalirPending').onclick=()=>sportingAuth.signOut();
+
 async function cargarEquiposSporting(){
   const snap = await sportingDb.collection('teams').get();
   const todos = snap.docs.map(d=>({id:d.id, ...d.data()}));
@@ -1046,19 +1118,6 @@ function abrirPartido(){
 }
 
 function renderBloqueSporting(){
-  if(!sporting.uid){
-    return `
-    <div class="aviso" style="background:rgba(93,125,214,.1);border-color:rgba(93,125,214,.35);color:#C4D1F5">
-      <b>Conexión con Sporting</b> (opcional). Inicia sesión con tu cuenta de Sporting Entrenamientos
-      para vincular este partido a una jornada ya creada allí y cargar la plantilla real del equipo.
-      Si no conectas, la app sigue funcionando igual, solo en local.</div>
-    <div class="fila-form" style="margin-bottom:16px">
-      <div class="campo"><label>Email</label><input id="spEmail" type="email" style="width:200px"></div>
-      <div class="campo"><label>Contraseña</label><input id="spPass" type="password" style="width:160px"></div>
-      <button class="btn" onclick="conectarSportingDesdeForm()">Conectar</button>
-    </div>`;
-  }
-
   const c=sporting.coach;
   const roleLabels={gestor:'Gestor',editor:'Editor',entrenador:'Entrenador'};
   let equiposHtml;
@@ -1100,15 +1159,7 @@ function renderBloqueSporting(){
   ${jornadasHtml}`;
 }
 
-async function conectarSportingDesdeForm(){
-  const email=document.getElementById('spEmail').value.trim();
-  const pass=document.getElementById('spPass').value;
-  if(!email||!pass){ toast('Pon email y contraseña.'); return; }
-  const r = await conectarSporting(email,pass);
-  if(r.ok){ toast('Conectado a Sporting.'); abrirPartido(); }
-  else toast(r.error);
-}
-function desconectarSportingDesdeForm(){ desconectarSporting(); toast('Sesión de Sporting cerrada.'); abrirPartido(); }
+function desconectarSportingDesdeForm(){ sportingAuth.signOut(); }
 async function cambiarEquipoSporting(teamId){
   sporting.teamId = teamId || null;
   sporting.jornadas = [];
@@ -1910,8 +1961,12 @@ document.addEventListener('keydown',e=>{
   }
 });
 
-// arranque
-(async()=>{
+// Arranque de la app en sí (vídeo, timeline, categorías): se llama una sola vez,
+// justo después de que el login haya confirmado una cuenta activa de Sporting.
+let appIniciada=false;
+async function arrancarApp(){
+  if(appIniciada) return;
+  appIniciada=true;
   await abrirDB();
   const d=await cargar();
   if(d && d.eventos && d.eventos.length){
@@ -1924,7 +1979,7 @@ document.addEventListener('keydown',e=>{
   }
   renderPanelCategorias();
   pintarTimeline();
-})();
+}
 </script>
 </body>
 </html>
