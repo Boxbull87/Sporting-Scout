@@ -137,6 +137,16 @@ input:focus,select:focus,button:focus-visible{outline:2px solid var(--rojo);outl
 }
 .drop:hover,.drop.activo{border-color:var(--rojo);color:var(--txt)}
 
+/* calibrar el recuadro del marcador (lectura OCR del reloj en pantalla) */
+.calibra-marcador{position:absolute;inset:0;z-index:10;cursor:crosshair;background:rgba(0,0,0,.15)}
+.calibra-marcador p{
+  position:absolute;top:10px;left:50%;transform:translateX(-50%);background:rgba(8,9,11,.85);
+  color:var(--txt);padding:6px 12px;border-radius:var(--radius);font-size:12px;white-space:nowrap;
+}
+.calibra-marcador p kbd{font-family:var(--display);font-size:11px;font-weight:600;background:var(--panel-2);
+  border:1px solid var(--line);border-radius:3px;padding:0 5px}
+.calibra-rect{position:absolute;border:2px dashed var(--rojo);background:rgba(216,35,42,.15);display:none}
+
 /* controles de transporte */
 .transporte{
   display:flex;align-items:center;gap:6px;padding:8px 12px;background:var(--panel);
@@ -376,6 +386,10 @@ input:focus,select:focus,button:focus-visible{outline:2px solid var(--rojo);outl
     <div class="video-zona" id="videoZona">
       <video id="vidLocal" playsinline></video>
       <div id="ytHost"></div>
+      <div class="calibra-marcador hidden" id="calibraMarcador">
+        <p>Arrastra un rectángulo sobre el reloj del marcador · <kbd>Esc</kbd> para cancelar</p>
+        <div class="calibra-rect" id="calibraRect"></div>
+      </div>
       <div class="fuente" id="fuente">
         <h2>Carga el partido</h2>
         <p>Trabaja con un archivo local si vas a exportar clips, o con YouTube si solo vas a marcar estadísticas.</p>
@@ -560,8 +574,13 @@ const estado = {
     fuenteVideo:null,          // 'local' | 'youtube'
     refVideo:'',               // nombre de archivo o id de YouTube
     t0:{1:null,2:null},        // segundo de vídeo en el que empieza cada parte
-    tFin:{1:null,2:null}       // segundo de vídeo en el que acaba de verdad cada parte (para
+    tFin:{1:null,2:null},      // segundo de vídeo en el que acaba de verdad cada parte (para
                                 // no contar como jugado el vídeo de descanso/después del pitido)
+    // Lectura del marcador en pantalla (OCR). region: {x,y,w,h} en fracción (0–1)
+    // del tamaño real del vídeo (no en píxeles de pantalla), para que valga
+    // aunque cambies de ventana o resolución. Fase 1: solo lectura puntual bajo
+    // demanda ("Probar lectura"); todavía no se usa para calcular minutos/eventos.
+    marcadorOCR:{activo:false, region:null}
   },
   // Paneles de categorías: cada uno es un juego de botones/teclas independiente
   // (ej. "Ataque", "Defensa", "Solo estadísticas"), sincronizado a tu cuenta de
@@ -723,6 +742,183 @@ function extraerIdYT(u){
   if(m) return m[1];
   if(/^[A-Za-z0-9_-]{11}$/.test(u.trim())) return u.trim();
   return null;
+}
+
+/* =====================================================================
+   MARCADOR EN PANTALLA (lectura OCR del reloj incrustado en el vídeo)
+   FASE 1 — solo lectura puntual bajo demanda para comprobar si el reconocimiento
+   de texto funciona con tu vídeo real. Todavía no se usa para calcular minutos
+   ni eventos (eso es la fase 2, una vez se confirme que la lectura es fiable).
+   Solo funciona con vídeo LOCAL: un iframe de YouTube no se puede leer píxel a
+   píxel desde el navegador (motivos de seguridad del propio YouTube).
+   ===================================================================== */
+
+// Tesseract.js es una librería grande (varios MB): se carga sola la primera
+// vez que hace falta, nunca al arrancar la app.
+let tesseractCargando=null;
+function cargarTesseract(){
+  if(window.Tesseract) return Promise.resolve();
+  if(tesseractCargando) return tesseractCargando;
+  tesseractCargando = new Promise((res,rej)=>{
+    const s=document.createElement('script');
+    s.src='https://cdn.jsdelivr.net/npm/tesseract.js@5.1.1/dist/tesseract.min.js';
+    s.onload=()=>res();
+    s.onerror=()=>{ tesseractCargando=null; rej(new Error('No se pudo cargar el lector de texto (revisa la conexión).')); };
+    document.head.appendChild(s);
+  });
+  return tesseractCargando;
+}
+
+// Área realmente ocupada por la imagen del vídeo dentro del elemento <video>
+// (object-fit:contain puede dejar bandas negras arriba/abajo o a los lados si
+// la proporción no encaja). Se calcula en coordenadas de pantalla, para poder
+// comparar directamente con clientX/clientY del arrastre de calibración.
+function areaVideoVisible(video){
+  const vw=video.videoWidth, vh=video.videoHeight;
+  const r=video.getBoundingClientRect();
+  if(!vw||!vh||!r.width||!r.height) return null;
+  const escala=Math.min(r.width/vw, r.height/vh);
+  const w=vw*escala, h=vh*escala;
+  return {x:r.left+(r.width-w)/2, y:r.top+(r.height-h)/2, w, h};
+}
+
+// Arrastra un recuadro sobre el vídeo para señalar dónde está el reloj del
+// marcador. Se guarda como fracción (0–1) del tamaño real del vídeo, no en
+// píxeles de pantalla, para que siga valiendo si cambias de ventana o de zoom.
+function calibrarMarcador(){
+  if(Reproductor.tipo!=='local'){ toast('La lectura de marcador solo funciona con vídeo local (no YouTube).'); return; }
+  cerrarModal();
+  const capa=document.getElementById('calibraMarcador');
+  const rect=document.getElementById('calibraRect');
+  const video=document.getElementById('vidLocal');
+  capa.classList.remove('hidden');
+  rect.style.display='none';
+
+  let x0=0,y0=0,arrastrando=false;
+  const limpiar=()=>{
+    capa.classList.add('hidden');
+    capa.removeEventListener('pointerdown',onDown);
+    window.removeEventListener('pointermove',onMove);
+    window.removeEventListener('pointerup',onUp);
+    document.removeEventListener('keydown',onKey);
+  };
+  function onDown(e){
+    x0=e.clientX; y0=e.clientY; arrastrando=true;
+    Object.assign(rect.style,{left:x0+'px',top:y0+'px',width:'0px',height:'0px',display:'block'});
+  }
+  function onMove(e){
+    if(!arrastrando) return;
+    const x=Math.min(x0,e.clientX), y=Math.min(y0,e.clientY);
+    Object.assign(rect.style,{left:x+'px',top:y+'px',width:Math.abs(e.clientX-x0)+'px',height:Math.abs(e.clientY-y0)+'px'});
+  }
+  function onUp(e){
+    if(!arrastrando) return;
+    arrastrando=false;
+    const area=areaVideoVisible(video);
+    const x=Math.min(x0,e.clientX), y=Math.min(y0,e.clientY);
+    const w=Math.abs(e.clientX-x0), h=Math.abs(e.clientY-y0);
+    limpiar();
+    if(!area || w<8 || h<8){ toast('Recuadro demasiado pequeño, no se ha guardado.'); abrirPartido(); return; }
+    estado.partido.marcadorOCR.region = {
+      x:Math.max(0,Math.min(1,(x-area.x)/area.w)),
+      y:Math.max(0,Math.min(1,(y-area.y)/area.h)),
+      w:Math.max(0,Math.min(1,w/area.w)),
+      h:Math.max(0,Math.min(1,h/area.h))
+    };
+    guardar();
+    toast('Recuadro guardado. Pulsa "Probar lectura ahora" para comprobarlo.');
+    abrirPartido();
+  }
+  function onKey(e){ if(e.key==='Escape'){ limpiar(); toast('Calibración cancelada.'); abrirPartido(); } }
+
+  capa.addEventListener('pointerdown',onDown);
+  window.addEventListener('pointermove',onMove);
+  window.addEventListener('pointerup',onUp);
+  document.addEventListener('keydown',onKey);
+}
+
+// Recorta el fotograma actual a la región calibrada, lo agranda y lo pasa a
+// blanco/negro con un umbral simple — ayuda mucho al OCR con el tipo de texto
+// (normalmente blanco o de color, con contorno) de los marcadores incrustados.
+function capturarRecorteMarcador(){
+  const region=estado.partido.marcadorOCR.region;
+  const video=document.getElementById('vidLocal');
+  if(!region || Reproductor.tipo!=='local' || !video.videoWidth) return null;
+  const sx=Math.round(region.x*video.videoWidth), sy=Math.round(region.y*video.videoHeight);
+  const sw=Math.max(1,Math.round(region.w*video.videoWidth)), sh=Math.max(1,Math.round(region.h*video.videoHeight));
+  const factor=3; // agranda el recorte: el OCR lee mucho mejor texto grande
+  const cv=document.createElement('canvas');
+  cv.width=sw*factor; cv.height=sh*factor;
+  const ctx=cv.getContext('2d');
+  ctx.drawImage(video, sx,sy,sw,sh, 0,0,cv.width,cv.height);
+  const img=ctx.getImageData(0,0,cv.width,cv.height);
+  const d=img.data;
+  for(let i=0;i<d.length;i+=4){
+    const gris=0.299*d[i]+0.587*d[i+1]+0.114*d[i+2];
+    const v = gris>140? 255:0;
+    d[i]=d[i+1]=d[i+2]=v;
+  }
+  ctx.putImageData(img,0,0);
+  return cv;
+}
+
+async function leerMarcadorAhora(){
+  if(Reproductor.tipo!=='local'){ toast('La lectura de marcador solo funciona con vídeo local.'); return; }
+  if(!estado.partido.marcadorOCR.region){ toast('Primero calibra el recuadro del marcador.'); return; }
+  const cv=capturarRecorteMarcador();
+  if(!cv){ toast('No se pudo capturar el fotograma actual.'); return; }
+  toast('Leyendo marcador…');
+  try{
+    await cargarTesseract();
+    const worker = await Tesseract.createWorker('eng');
+    await worker.setParameters({tessedit_char_whitelist:'0123456789:'});
+    const {data} = await worker.recognize(cv);
+    await worker.terminate();
+    const texto=(data.text||'').trim();
+    const m=texto.match(/(\d{1,2}):(\d{2})/);
+    mostrarResultadoOCR(cv, texto, data.confidence, m? m[0]:null);
+  }catch(err){
+    toast('Error al leer el marcador: '+err.message);
+  }
+}
+
+function mostrarResultadoOCR(cv, texto, confianza, minutoDetectado){
+  modal('Prueba de lectura del marcador', `
+    <p style="color:var(--muted);font-size:11px;margin-bottom:10px">Esto es justo lo que ha visto el lector
+      (recortado y en blanco/negro) — compáralo con lo que se ve en el vídeo en este momento.</p>
+    <img src="${cv.toDataURL()}" style="max-width:100%;border:1px solid var(--line);border-radius:4px;
+      image-rendering:pixelated;margin-bottom:12px">
+    <div class="fila-form" style="margin-bottom:0">
+      <div class="campo"><label>Texto reconocido</label><b style="font-size:14px">${texto||'(nada)'}</b></div>
+      <div class="campo"><label>Confianza</label><b style="font-size:14px">${confianza!=null?Math.round(confianza)+'%':'—'}</b></div>
+      <div class="campo"><label>Minuto detectado</label>
+        <b style="font-size:14px;color:${minutoDetectado?'var(--ok)':'var(--rojo)'}">${minutoDetectado||'no reconocido'}</b></div>
+    </div>
+    <p style="color:var(--muted);font-size:11px;margin-top:12px">Si no ha acertado, prueba a recalibrar el
+      recuadro ajustándolo más justo al reloj, o comprueba que el marcador se vea con claridad en ese punto del vídeo.</p>
+    <div class="fila-form" style="margin-top:14px">
+      <button class="btn" onclick="calibrarMarcador()">Recalibrar recuadro</button>
+      <button class="btn btn-rojo" onclick="leerMarcadorAhora()">Probar de nuevo</button>
+    </div>
+  `);
+}
+
+function bloqueMarcadorOCR(){
+  const m=estado.partido.marcadorOCR;
+  const esLocal=Reproductor.tipo==='local';
+  return `
+    <p style="color:var(--muted);font-size:11px;line-height:1.6">
+      Fase de prueba: calibra un recuadro sobre el reloj del marcador incrustado en el vídeo y comprueba si el
+      lector automático de texto lo reconoce bien, antes de activar nada más grande. Solo funciona con vídeo
+      local (no con YouTube).
+    </p>
+    ${!esLocal? '<div class="aviso">Carga un vídeo local para poder calibrar y probar el marcador.</div>' : `
+    <div class="fila-form">
+      <button class="btn" onclick="calibrarMarcador()">${m.region?'Recalibrar recuadro':'Calibrar recuadro'}</button>
+      <button class="btn" onclick="leerMarcadorAhora()" ${!m.region?'disabled':''}>Probar lectura ahora</button>
+      <span style="color:var(--muted);font-size:11px">${m.region?'Recuadro calibrado ✓':'Sin calibrar todavía'}</span>
+    </div>`}
+  `;
 }
 
 /* =====================================================================
@@ -1206,6 +1402,7 @@ function aplicarProyecto(id,datos){
   estado.partido=datos.partido || estado.partido;
   estado.partido.id=id;
   if(!estado.partido.tFin) estado.partido.tFin={1:null,2:null}; // proyectos guardados antes de que existiera
+  if(!estado.partido.marcadorOCR) estado.partido.marcadorOCR={activo:false, region:null};
   estado.plantillaPropia=datos.plantillaPropia || [];
   estado.plantillaRival=datos.plantillaRival || [];
   estado.eventos=datos.eventos || [];
@@ -1300,7 +1497,8 @@ function nuevoProyecto(mantenerPropia){
     id:'p_'+Date.now(), vinculado:false, partidoSportingId:null,
     equipoPropio:estado.partido.equipoPropio||'CD Sporting FS Almería',
     equipoRival:'Rival', fecha:new Date().toISOString().slice(0,10),
-    competicion:'', esRivalFuturo:false, fuenteVideo:null, refVideo:'', t0:{1:null,2:null}, tFin:{1:null,2:null}
+    competicion:'', esRivalFuturo:false, fuenteVideo:null, refVideo:'', t0:{1:null,2:null}, tFin:{1:null,2:null},
+    marcadorOCR:{activo:false, region:null}
   };
   estado.plantillaPropia=mantenerPropia? propiaActual : [];
   estado.plantillaRival=[];
@@ -1643,7 +1841,11 @@ function abrirPartido(){
       final: <b>${p.tFin[1]!==null?tc(p.tFin[1]):'sin fijar'}</b><br>
       2ª parte — saque: <b>${p.t0[2]!==null?tc(p.t0[2]):'sin fijar'}</b> ·
       final: <b>${p.tFin[2]!==null?tc(p.tFin[2]):'sin fijar'}</b>
-    </p>`);
+    </p>
+
+    <h3 style="font-size:10px;letter-spacing:.15em;text-transform:uppercase;color:var(--muted);margin:16px 0 8px">
+      Marcador en pantalla (lectura automática · experimental)</h3>
+    ${bloqueMarcadorOCR()}`);
 }
 
 function renderBloqueSporting(){
@@ -3033,6 +3235,7 @@ document.getElementById('ficheroJson').onchange=e=>{
       // ningún panel, sus eventos se siguen viendo (con un color neutro de reserva).
       estado.partido=d.partido||estado.partido;
       if(!estado.partido.tFin) estado.partido.tFin={1:null,2:null};
+      if(!estado.partido.marcadorOCR) estado.partido.marcadorOCR={activo:false, region:null};
       estado.plantillaPropia=d.plantillaPropia||[];
       estado.plantillaRival=d.plantillaRival||[];
       estado.eventos=d.eventos||[];
