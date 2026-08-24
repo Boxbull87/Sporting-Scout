@@ -285,6 +285,7 @@ input:focus,select:focus,button:focus-visible{outline:2px solid var(--rojo);outl
   <button class="btn" id="btnParte">1ª parte</button>
   <button class="btn" id="btnT0" title="Marca el saque inicial de la parte actual en este punto del vídeo">Fijar saque inicial</button>
   <div class="top-sep"></div>
+  <button class="btn" id="btnProyectos">Proyectos</button>
   <button class="btn" id="btnPartido">Partido</button>
   <button class="btn" id="btnPlantillas">Plantillas</button>
   <button class="btn" id="btnCategorias">Categorías</button>
@@ -859,15 +860,23 @@ function tc(s){
 
 /* =====================================================================
    PERSISTENCIA LOCAL (IndexedDB, con export/import JSON como respaldo)
-   Cuando toque, esta es la única capa que hay que sustituir por Firestore.
+   Cada partido es un "proyecto" independiente en el store 'proyectos',
+   guardado bajo su propio id (estado.partido.id) — ya no se pisan entre sí.
+   Las categorías son la excepción: viven en el store 'config' porque son tu
+   plantilla de marcaje (una configuración de la app), no datos de un partido
+   concreto, así que se comparten entre todos los proyectos.
    ===================================================================== */
 
 let db=null;
 function abrirDB(){
   return new Promise(res=>{
     try{
-      const r=indexedDB.open('scoutingfs',1);
-      r.onupgradeneeded=e=>{ e.target.result.createObjectStore('proyectos'); };
+      const r=indexedDB.open('scoutingfs',2);
+      r.onupgradeneeded=e=>{
+        const dbUp=e.target.result;
+        if(!dbUp.objectStoreNames.contains('proyectos')) dbUp.createObjectStore('proyectos');
+        if(!dbUp.objectStoreNames.contains('config')) dbUp.createObjectStore('config');
+      };
       r.onsuccess=e=>{ db=e.target.result; res(true); };
       r.onerror=()=>res(false);
     }catch(e){ res(false); }
@@ -876,21 +885,144 @@ function abrirDB(){
 function guardar(){
   if(!db) return;
   try{
-    const datos={partido:estado.partido, categorias:estado.categorias,
-      plantillaPropia:estado.plantillaPropia,
-      plantillaRival:estado.plantillaRival, eventos:estado.eventos};
-    db.transaction('proyectos','readwrite').objectStore('proyectos').put(datos,'actual');
+    const datos={partido:estado.partido, plantillaPropia:estado.plantillaPropia,
+      plantillaRival:estado.plantillaRival, eventos:estado.eventos,
+      actualizado:new Date().toISOString()};
+    db.transaction('proyectos','readwrite').objectStore('proyectos').put(datos, estado.partido.id);
+    db.transaction('config','readwrite').objectStore('config')
+      .put({categorias:estado.categorias, ultimoProyectoId:estado.partido.id}, 'global');
   }catch(e){}
 }
-function cargar(){
+function cargarConfig(){
   return new Promise(res=>{
     if(!db) return res(null);
     try{
-      const r=db.transaction('proyectos','readonly').objectStore('proyectos').get('actual');
+      const r=db.transaction('config','readonly').objectStore('config').get('global');
       r.onsuccess=()=>res(r.result||null);
       r.onerror=()=>res(null);
     }catch(e){ res(null); }
   });
+}
+function cargarProyecto(id){
+  return new Promise(res=>{
+    if(!db) return res(null);
+    try{
+      const r=db.transaction('proyectos','readonly').objectStore('proyectos').get(id);
+      r.onsuccess=()=>res(r.result||null);
+      r.onerror=()=>res(null);
+    }catch(e){ res(null); }
+  });
+}
+function listarProyectos(){
+  return new Promise(res=>{
+    if(!db) return res([]);
+    try{
+      const store=db.transaction('proyectos','readonly').objectStore('proyectos');
+      const out=[];
+      const req=store.openCursor();
+      req.onsuccess=e=>{
+        const cur=e.target.result;
+        if(cur){ if(cur.key!=='actual') out.push({id:cur.key, ...cur.value}); cur.continue(); }
+        else res(out);
+      };
+      req.onerror=()=>res([]);
+    }catch(e){ res([]); }
+  });
+}
+function borrarProyectoDB(id){
+  return new Promise(res=>{
+    if(!db) return res(false);
+    try{
+      const tx=db.transaction('proyectos','readwrite');
+      tx.objectStore('proyectos').delete(id);
+      tx.oncomplete=()=>res(true);
+      tx.onerror=()=>res(false);
+    }catch(e){ res(false); }
+  });
+}
+
+// Migración desde el formato antiguo (un único proyecto bajo la clave 'actual',
+// de antes de que existieran los proyectos independientes). Se ejecuta una vez
+// al arrancar; si no hay nada bajo 'actual' no hace nada.
+function migrarProyectoLegado(){
+  return new Promise(res=>{
+    if(!db) return res();
+    try{
+      const r=db.transaction('proyectos','readonly').objectStore('proyectos').get('actual');
+      r.onsuccess=()=>{
+        const legado=r.result;
+        if(!legado){ res(); return; }
+        const id=(legado.partido && legado.partido.id) || ('p_'+Date.now());
+        if(legado.partido) legado.partido.id=id;
+        const datos={partido:legado.partido, plantillaPropia:legado.plantillaPropia||[],
+          plantillaRival:legado.plantillaRival||[], eventos:legado.eventos||[],
+          actualizado:new Date().toISOString()};
+        const tx=db.transaction(['proyectos','config'],'readwrite');
+        tx.objectStore('proyectos').put(datos, id);
+        tx.objectStore('proyectos').delete('actual');
+        tx.objectStore('config').put({categorias:legado.categorias||estado.categorias, ultimoProyectoId:id},'global');
+        tx.oncomplete=()=>res();
+        tx.onerror=()=>res();
+      };
+      r.onerror=()=>res();
+    }catch(e){ res(); }
+  });
+}
+
+function aplicarProyecto(id,datos){
+  estado.partido=datos.partido || estado.partido;
+  estado.partido.id=id;
+  estado.plantillaPropia=datos.plantillaPropia || [];
+  estado.plantillaRival=datos.plantillaRival || [];
+  estado.eventos=datos.eventos || [];
+  estado.seleccion=null;
+  estado.pendiente=null;
+  estado.enCurso={};
+}
+
+// Vacía el visor (vídeo local o YouTube) para empezar un proyecto distinto.
+// El API de YouTube sustituye el div #ytHost por un <iframe> al crear el
+// player, así que hay que reconstruirlo para poder volver a cargar otro vídeo.
+function resetReproductor(){
+  const v=document.getElementById('vidLocal');
+  if(v.src && v.src.startsWith('blob:')) URL.revokeObjectURL(v.src);
+  try{ v.pause(); }catch(e){}
+  v.removeAttribute('src'); try{ v.load(); }catch(e){}
+  v.style.display='none';
+
+  if(Reproductor.yt){ try{ Reproductor.yt.destroy(); }catch(e){} }
+  const ytHostViejo=document.getElementById('ytHost');
+  if(ytHostViejo){
+    const nuevo=document.createElement('div');
+    nuevo.id='ytHost';
+    nuevo.style.display='none';
+    ytHostViejo.replaceWith(nuevo);
+  }
+
+  document.getElementById('fuente').style.display='';
+  document.getElementById('ytUrl').value='';
+  document.getElementById('estadoFuente').textContent='';
+  Reproductor.tipo=null; Reproductor.vid=null; Reproductor.yt=null; Reproductor.ytListo=false;
+  botonPlay();
+}
+
+// mantenerPropia: conserva la plantilla propia actual (tu equipo no cambia
+// de partido a partido); la rival siempre se vacía porque cambia cada vez.
+function nuevoProyecto(mantenerPropia){
+  const propiaActual=estado.plantillaPropia;
+  estado.partido={
+    id:'p_'+Date.now(), vinculado:false, partidoSportingId:null,
+    equipoPropio:estado.partido.equipoPropio||'CD Sporting FS Almería',
+    equipoRival:'Rival', fecha:new Date().toISOString().slice(0,10),
+    competicion:'', esRivalFuturo:false, fuenteVideo:null, refVideo:'', t0:{1:null,2:null}
+  };
+  estado.plantillaPropia=mantenerPropia? propiaActual : [];
+  estado.plantillaRival=[];
+  estado.eventos=[];
+  estado.seleccion=null;
+  estado.pendiente=null;
+  estado.enCurso={};
+  guardar();
 }
 
 function exportarJSON(){
@@ -1088,6 +1220,73 @@ function modal(titulo, html){
   document.getElementById('modal').classList.add('abierto');
 }
 function cerrarModal(){ document.getElementById('modal').classList.remove('abierto'); }
+
+/* =====================================================================
+   PROYECTOS
+   Cada partido marcado es un proyecto independiente y guardado aparte
+   (ver PERSISTENCIA LOCAL). Aquí solo vive la lista/crear/abrir/borrar.
+   ===================================================================== */
+
+async function abrirProyectos(){
+  const lista = await listarProyectos();
+  lista.sort((a,b)=> new Date(b.actualizado||0) - new Date(a.actualizado||0));
+
+  const filas = lista.map(p=>{
+    const activo = p.id===estado.partido.id;
+    const rival = (p.partido && p.partido.equipoRival) || 'Rival';
+    const fecha = (p.partido && p.partido.fecha) || '—';
+    const futuro = p.partido && p.partido.esRivalFuturo;
+    return `<tr${activo?' style="background:var(--panel-2)"':''}>
+      <td>${rival}${futuro?' <span class="pill" style="background:#E0A32E22;color:#E0A32E">futuro</span>':''}</td>
+      <td class="tc">${fecha}</td>
+      <td class="tc">${(p.eventos||[]).length}</td>
+      <td class="tc" style="color:var(--muted)">${p.actualizado? new Date(p.actualizado).toLocaleString():'—'}</td>
+      <td style="text-align:right;white-space:nowrap">
+        ${activo? '<span style="color:var(--muted);font-size:11px">Abierto</span>'
+          : `<button class="btn" style="padding:2px 8px" onclick="abrirProyectoDesdeForm('${p.id}')">Abrir</button>`}
+        <button class="btn" style="padding:2px 8px" onclick="borrarProyectoDesdeForm('${p.id}')" ${activo?'disabled':''}>Borrar</button>
+      </td></tr>`;
+  }).join('');
+
+  modal('Proyectos', `
+    <div class="fila-form" style="margin-bottom:14px">
+      <button class="btn btn-rojo" onclick="nuevoProyectoDesdeForm()">+ Nuevo proyecto</button>
+      <span style="color:var(--muted);font-size:11px">Empieza en blanco (mantiene tu plantilla propia y tus categorías).</span>
+    </div>
+    ${lista.length? `<div style="overflow-x:auto"><table class="tabla">
+      <thead><tr><th>Rival</th><th>Fecha</th><th>Eventos</th><th>Última edición</th><th></th></tr></thead>
+      <tbody>${filas}</tbody></table></div>`
+    : '<p style="color:var(--muted);font-size:11px">Todavía no hay proyectos guardados.</p>'}
+  `);
+}
+
+function nuevoProyectoDesdeForm(){
+  if(estado.eventos.length &&
+     !confirm('¿Crear un proyecto nuevo? El actual se queda guardado, puedes volver a abrirlo desde Proyectos.')) return;
+  nuevoProyecto(true);
+  resetReproductor();
+  renderPanelCategorias();
+  pintarTimeline();
+  cerrarModal();
+  toast('Proyecto nuevo creado.');
+}
+async function abrirProyectoDesdeForm(id){
+  const p = await cargarProyecto(id);
+  if(!p){ toast('No se pudo abrir ese proyecto.'); return; }
+  aplicarProyecto(id, p);
+  guardar();
+  resetReproductor();
+  renderPanelCategorias();
+  pintarTimeline();
+  cerrarModal();
+  toast('Proyecto abierto · '+estado.eventos.length+' eventos. Carga el vídeo otra vez.');
+}
+async function borrarProyectoDesdeForm(id){
+  if(!confirm('¿Borrar este proyecto? Esta acción no se puede deshacer.')) return;
+  await borrarProyectoDB(id);
+  toast('Proyecto borrado.');
+  abrirProyectos();
+}
 
 function abrirPartido(){
   const p=estado.partido;
@@ -1898,6 +2097,7 @@ document.getElementById('btnT0').onclick=()=>{
 };
 
 // barra superior
+document.getElementById('btnProyectos').onclick=abrirProyectos;
 document.getElementById('btnPartido').onclick=abrirPartido;
 document.getElementById('btnPlantillas').onclick=abrirPlantillas;
 document.getElementById('btnCategorias').onclick=abrirCategorias;
@@ -1968,14 +2168,17 @@ async function arrancarApp(){
   if(appIniciada) return;
   appIniciada=true;
   await abrirDB();
-  const d=await cargar();
-  if(d && d.eventos && d.eventos.length){
-    estado.partido=d.partido||estado.partido;
-    estado.categorias=(d.categorias&&d.categorias.length)? d.categorias : estado.categorias;
-    estado.plantillaPropia=d.plantillaPropia||[];
-    estado.plantillaRival=d.plantillaRival||[];
-    estado.eventos=d.eventos||[];
-    toast('Sesión anterior recuperada · '+estado.eventos.length+' eventos. Carga el vídeo otra vez.');
+  await migrarProyectoLegado();
+  const cfg = await cargarConfig();
+  if(cfg && cfg.categorias && cfg.categorias.length) estado.categorias=cfg.categorias;
+  if(cfg && cfg.ultimoProyectoId){
+    const p = await cargarProyecto(cfg.ultimoProyectoId);
+    if(p){
+      aplicarProyecto(cfg.ultimoProyectoId, p);
+      if(estado.eventos.length){
+        toast('Proyecto recuperado · '+estado.eventos.length+' eventos. Carga el vídeo otra vez.');
+      }
+    }
   }
   renderPanelCategorias();
   pintarTimeline();
