@@ -982,6 +982,10 @@ async function sincronizarConFirestore(){
       equipoPropio: p.equipoPropio, equipoRival: p.equipoRival,
       fecha: p.fecha, competicion: p.competicion, esRivalFuturo: !!p.esRivalFuturo,
       coachUid: sporting.uid,
+      // Se manda la definición de categorías (nombre/color/si cuenta en estadísticas) para que
+      // quien lea esto desde fuera (ej. Sporting) sepa interpretar el campo "tipo" de cada evento
+      // sin tener que duplicar esa lista a mano.
+      categorias: estado.categorias.map(c=>({id:c.id, nom:c.nom, color:c.color, stats:c.stats!==false})),
       actualizado: firebase.firestore.FieldValue.serverTimestamp()
     }, {merge:true});
 
