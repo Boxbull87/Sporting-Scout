@@ -229,10 +229,13 @@ input:focus,select:focus,button:focus-visible{outline:2px solid var(--rojo);outl
 .ajuste-fila button{padding:2px 7px}
 .dorsales{display:flex;flex-wrap:wrap;gap:5px;margin-bottom:8px}
 .dorsal{
-  min-width:32px;padding:6px 7px;border:1px solid var(--line);border-radius:4px;background:var(--panel);
-  font-family:var(--display);font-size:15px;font-weight:600;font-variant-numeric:tabular-nums;
+  min-width:32px;padding:6px 8px;border:1px solid var(--line);border-radius:4px;background:var(--panel);
+  display:inline-flex;align-items:baseline;gap:5px;
 }
 .dorsal:hover{background:var(--rojo);border-color:var(--rojo)}
+.dorsal .dorsal-n{font-family:var(--display);font-size:15px;font-weight:600;font-variant-numeric:tabular-nums}
+.dorsal .dorsal-nom{font-size:11px;color:var(--muted)}
+.dorsal:hover .dorsal-nom{color:#F0D0D0}
 .resultados{display:flex;flex-wrap:wrap;gap:5px}
 .res{padding:5px 9px;border:1px solid var(--line);border-radius:4px;background:var(--panel);font-size:11px}
 .res:hover{background:#303641}
@@ -802,7 +805,8 @@ function abrirRapida(ev,cat){
   }else{
     plantilla.forEach(j=>{
       const b=document.createElement('button');
-      b.className='dorsal'; b.textContent=j.dorsal;
+      b.className='dorsal';
+      b.innerHTML=`<span class="dorsal-n">${j.dorsal}</span>`+(j.nombre?`<span class="dorsal-nom">${j.nombre}</span>`:'');
       b.title=j.nombre||('Dorsal '+j.dorsal);
       b.onclick=()=>{ ev.jugadorRef={tipo:ev.equipo,id:j.id};
         // etiqueta "congelada" en el propio evento: si el jugador se borra en Sporting
@@ -2143,9 +2147,10 @@ function intervalosQuinteto(){
 function etiquetaQuinteto(ids){
   return ids.map(id=>{
     const j=estado.plantillaPropia.find(x=>x.id===id);
-    return {txt: j?'#'+j.dorsal:'#?', n: j?Number(j.dorsal):NaN};
+    const txt = j? '#'+j.dorsal+(j.nombre?' '+j.nombre:'') : '#?';
+    return {txt, n: j?Number(j.dorsal):NaN};
   }).sort((a,b)=> isNaN(a.n)||isNaN(b.n)? a.txt.localeCompare(b.txt) : a.n-b.n)
-    .map(x=>x.txt).join(' ');
+    .map(x=>x.txt).join(', ');
 }
 function statsPorQuinteto(eventos){
   const catsCruza = catsCruzanQuinteto();
