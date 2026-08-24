@@ -582,8 +582,9 @@ const estado = {
     // crono suele empezar en 20:00 y bajar, a diferencia del reloj de la app
     // (que cuenta hacia arriba desde el saque). Fase 1: solo lectura puntual
     // bajo demanda ("Probar lectura"); todavía no se usa para calcular
-    // minutos/eventos.
-    marcadorOCR:{activo:false, region:null, cuentaAtras:true}
+    // minutos/eventos. ultimaLectura: {tVideo, totalSeg} de la última lectura
+    // confirmada, para poder desambiguar lecturas dudosas por continuidad.
+    marcadorOCR:{activo:false, region:null, cuentaAtras:true, ultimaLectura:null}
   },
   // Paneles de categorías: cada uno es un juego de botones/teclas independiente
   // (ej. "Ataque", "Defensa", "Solo estadísticas"), sincronizado a tu cuenta de
@@ -756,6 +757,21 @@ function extraerIdYT(u){
    píxel desde el navegador (motivos de seguridad del propio YouTube).
    ===================================================================== */
 
+// Se asegura de que estado.partido.marcadorOCR tiene todos los campos que
+// usa esta sección, tanto en un partido nuevo como en uno guardado antes de
+// que existiera alguno de ellos. Un único sitio donde tocar si se añade algo.
+function asegurarMarcadorOCR(){
+  if(!estado.partido.marcadorOCR){
+    estado.partido.marcadorOCR={activo:false, region:null, cuentaAtras:true, ultimaLectura:null};
+    return;
+  }
+  const m=estado.partido.marcadorOCR;
+  if(m.cuentaAtras===undefined) m.cuentaAtras=true;
+  if(m.ultimaLectura===undefined) m.ultimaLectura=null;
+  if(m.activo===undefined) m.activo=false;
+  if(m.region===undefined) m.region=null;
+}
+
 // Tesseract.js es una librería grande (varios MB): se carga sola la primera
 // vez que hace falta, nunca al arrancar la app.
 let tesseractCargando=null;
@@ -849,10 +865,12 @@ function capturarRecorteMarcador(){
   if(!region || Reproductor.tipo!=='local' || !video.videoWidth) return null;
   const sx=Math.round(region.x*video.videoWidth), sy=Math.round(region.y*video.videoHeight);
   const sw=Math.max(1,Math.round(region.w*video.videoWidth)), sh=Math.max(1,Math.round(region.h*video.videoHeight));
-  const factor=3; // agranda el recorte: el OCR lee mucho mejor texto grande
+  const factor=4; // agranda el recorte: el OCR lee mucho mejor texto grande (sobre todo trazos finos como el "1")
   const cv=document.createElement('canvas');
   cv.width=sw*factor; cv.height=sh*factor;
   const ctx=cv.getContext('2d');
+  ctx.imageSmoothingEnabled=true;
+  ctx.imageSmoothingQuality='high';
   ctx.drawImage(video, sx,sy,sw,sh, 0,0,cv.width,cv.height);
   const img=ctx.getImageData(0,0,cv.width,cv.height);
   const d=img.data;
@@ -905,50 +923,77 @@ function encontrarHuecoAncho(cv){
   return {bloquesAntes:mejor.indice+1, bloquesDespues:bloques.length-(mejor.indice+1)};
 }
 
+function formatearMMSS(c){ return String(c.min).padStart(2,'0')+':'+String(c.seg).padStart(2,'0'); }
+
 // El marcador suele parpadear los dos puntos (encendido/apagado cada medio
 // segundo), así que en un fotograma cualquiera es normal que no se vean y el
 // OCR devuelva algo como "1959" en vez de "19:59". Además, en los últimos
 // segundos de la parte muchos marcadores cambian a mostrar solo segundos y
 // décima (ej. "42.5" = 42 segundos y 5 décimas), con un punto en vez de dos
 // puntos — ahí solo nos interesan los segundos, la décima se descarta.
-// Orden de confianza: 1) si el separador se ve claro, se usa directamente
-// (dos dígitos detrás = mm:ss, uno solo = ss.d). 2) si no se ve, se mide el
-// hueco visual entre grupos de dígitos (encontrarHuecoAncho) para agruparlos
-// igual de bien sin depender de que el OCR acierte con la puntuación.
-// 3) como último recurso, sin ninguna pista, se asume mm:ss (los 2 últimos
-// dígitos son segundos) — es una suposición, se marca con colonDirecto:false.
-function parsearMinutoMarcador(texto, cv){
+// Cuando el texto reconocido es ambiguo (varias lecturas posibles), en vez de
+// quedarnos con una sola suposición generamos TODAS las interpretaciones
+// razonables — las decide elegirMejorCandidato() comparando con la última
+// lectura confirmada, en vez de aquí a ciegas.
+function candidatosMinutoMarcador(texto, cv){
+  const candidatos=[];
   const limpio=(texto||'').replace(/[^0-9:.]/g,'');
 
   const conMinutos=limpio.match(/(\d{1,2})[:.](\d{2})(?!\d)/);
-  if(conMinutos) return {min:+conMinutos[1], seg:+conMinutos[2],
-    texto:String(+conMinutos[1]).padStart(2,'0')+':'+conMinutos[2], colonDirecto:true};
+  if(conMinutos) candidatos.push({min:+conMinutos[1], seg:+conMinutos[2], colonDirecto:true, metodo:'separador'});
 
   const soloSegundos=limpio.match(/(\d{1,2})\.(\d)(?!\d)/);
-  if(soloSegundos) return {min:0, seg:+soloSegundos[1],
-    texto:'00:'+String(+soloSegundos[1]).padStart(2,'0'), colonDirecto:true, decimas:true};
+  if(soloSegundos) candidatos.push({min:0, seg:+soloSegundos[1], colonDirecto:true, decimas:true, metodo:'decimas'});
 
   const soloDigitos=limpio.replace(/[:.]/g,'');
 
+  // Hueco visual entre grupos de dígitos (ver encontrarHuecoAncho): distingue
+  // "mm:ss" de "ss.d" aunque no se reconozca ningún separador.
   if(cv && soloDigitos.length>=3){
     const hueco=encontrarHuecoAncho(cv);
     if(hueco && hueco.bloquesAntes+hueco.bloquesDespues===soloDigitos.length){
       if(hueco.bloquesDespues===2){
-        const min=soloDigitos.slice(0,hueco.bloquesAntes)||'0', seg=soloDigitos.slice(-2);
-        return {min:+min, seg:+seg, texto:min.padStart(2,'0')+':'+seg, colonDirecto:false, porHueco:true};
+        candidatos.push({min:+(soloDigitos.slice(0,hueco.bloquesAntes)||'0'), seg:+soloDigitos.slice(-2),
+          colonDirecto:false, porHueco:true, metodo:'hueco-mmss'});
       }
       if(hueco.bloquesAntes===2 && hueco.bloquesDespues===1){
-        const seg=soloDigitos.slice(0,2);
-        return {min:0, seg:+seg, texto:'00:'+seg, colonDirecto:false, decimas:true, porHueco:true};
+        candidatos.push({min:0, seg:+soloDigitos.slice(0,2),
+          colonDirecto:false, decimas:true, porHueco:true, metodo:'hueco-ssd'});
       }
     }
   }
 
-  if(soloDigitos.length>=3 && soloDigitos.length<=4){
+  // Sin ninguna pista visual: las dos interpretaciones posibles de los mismos
+  // dígitos sueltos, para que elegirMejorCandidato() decida por continuidad.
+  if(soloDigitos.length===3 || soloDigitos.length===4){
     const seg=soloDigitos.slice(-2), min=soloDigitos.slice(0,-2)||'0';
-    if(+seg<60) return {min:+min, seg:+seg, texto:min.padStart(2,'0')+':'+seg, colonDirecto:false};
+    if(+seg<60) candidatos.push({min:+min, seg:+seg, colonDirecto:false, metodo:'ultimo-mmss'});
   }
-  return null;
+  if(soloDigitos.length===3 && +soloDigitos.slice(0,2)<60){
+    candidatos.push({min:0, seg:+soloDigitos.slice(0,2), colonDirecto:false, decimas:true, metodo:'ultimo-ssd'});
+  }
+
+  candidatos.forEach(c=>{ c.texto=formatearMMSS(c); c.totalSeg=c.min*60+c.seg; });
+  return candidatos;
+}
+
+// Tu idea: si ya sabemos que hace un momento el marcador decía tal minuto, la
+// lectura de ahora "tiene que" andar cerca de ese minuto más (o menos, si el
+// crono cuenta atrás) el tiempo de vídeo que ha pasado desde entonces. Entre
+// varias lecturas posibles del mismo texto, se elige la que más se acerque a
+// ese valor esperado, en vez de la primera por orden de método.
+function elegirMejorCandidato(candidatos, tVideoActual){
+  if(!candidatos.length) return null;
+  const ultima=estado.partido.marcadorOCR.ultimaLectura;
+  if(!ultima || candidatos.length===1) return candidatos[0];
+  const direccion = estado.partido.marcadorOCR.cuentaAtras? -1 : 1;
+  const esperado = ultima.totalSeg + direccion*(tVideoActual-ultima.tVideo);
+  let mejor=candidatos[0], mejorDist=Math.abs(candidatos[0].totalSeg-esperado);
+  candidatos.forEach(c=>{
+    const dist=Math.abs(c.totalSeg-esperado);
+    if(dist<mejorDist){ mejorDist=dist; mejor=c; }
+  });
+  return {...mejor, porContinuidad:true};
 }
 
 async function leerMarcadorAhora(){
@@ -956,48 +1001,72 @@ async function leerMarcadorAhora(){
   if(!estado.partido.marcadorOCR.region){ toast('Primero calibra el recuadro del marcador.'); return; }
   const cv=capturarRecorteMarcador();
   if(!cv){ toast('No se pudo capturar el fotograma actual.'); return; }
+  const tVideo=Reproductor.tiempo();
   toast('Leyendo marcador…');
   try{
     await cargarTesseract();
     const worker = await Tesseract.createWorker('eng');
-    await worker.setParameters({tessedit_char_whitelist:'0123456789:.'});
+    await worker.setParameters({
+      tessedit_char_whitelist:'0123456789:.',
+      tessedit_pageseg_mode:'7' // el recorte es una sola línea de texto corta: ayuda mucho a acertar
+    });
     const {data} = await worker.recognize(cv);
     await worker.terminate();
     const texto=(data.text||'').trim();
-    mostrarResultadoOCR(cv, texto, data.confidence, parsearMinutoMarcador(texto, cv));
+    const elegido=elegirMejorCandidato(candidatosMinutoMarcador(texto, cv), tVideo);
+    mostrarResultadoOCR(cv, texto, data.confidence, elegido, tVideo);
   }catch(err){
     toast('Error al leer el marcador: '+err.message);
   }
 }
 
-function mostrarResultadoOCR(cv, texto, confianza, parseado){
-  const nota = parseado && parseado.porHueco
-      ? ' <span style="color:var(--warn);font-size:10px;font-weight:400">(agrupado por el hueco entre dígitos, sin separador visible)</span>'
-    : parseado && !parseado.colonDirecto
-      ? ' <span style="color:var(--warn);font-size:10px;font-weight:400">(dos puntos no vistos, deducido)</span>'
-    : parseado && parseado.decimas
-      ? ' <span style="color:var(--muted);font-size:10px;font-weight:400">(formato segundos.décima, la décima se descarta)</span>'
-    : '';
-  const minutoHtml = parseado ? parseado.texto+nota
-    : 'no reconocido';
+function mostrarResultadoOCR(cv, texto, confianza, elegido, tVideo){
+  const notas=[];
+  if(elegido){
+    if(elegido.porContinuidad) notas.push('ajustado comparando con la última lectura confirmada');
+    if(elegido.porHueco) notas.push('agrupado por el hueco entre dígitos, sin separador visible');
+    else if(!elegido.colonDirecto) notas.push('separador no visto, deducido');
+    if(elegido.decimas) notas.push('formato segundos.décima, la décima se descarta');
+  }
+  const notaHtml = notas.length
+    ? ' <span style="color:var(--warn);font-size:10px;font-weight:400">('+notas.join(' · ')+')</span>' : '';
+  const minutoHtml = elegido ? elegido.texto+notaHtml : 'no reconocido';
   modal('Prueba de lectura del marcador', `
     <p style="color:var(--muted);font-size:11px;margin-bottom:10px">Esto es justo lo que ha visto el lector
       (recortado y en blanco/negro) — compáralo con lo que se ve en el vídeo en este momento.</p>
     <img src="${cv.toDataURL()}" style="max-width:100%;border:1px solid var(--line);border-radius:4px;
       image-rendering:pixelated;margin-bottom:12px">
-    <div class="fila-form" style="margin-bottom:0">
+    <div class="fila-form" style="margin-bottom:10px">
       <div class="campo"><label>Texto reconocido</label><b style="font-size:14px">${texto||'(nada)'}</b></div>
       <div class="campo"><label>Confianza</label><b style="font-size:14px">${confianza!=null?Math.round(confianza)+'%':'—'}</b></div>
       <div class="campo"><label>Minuto detectado</label>
-        <b style="font-size:14px;color:${parseado?'var(--ok)':'var(--rojo)'}">${minutoHtml}</b></div>
+        <b style="font-size:14px;color:${elegido?'var(--ok)':'var(--rojo)'}">${minutoHtml}</b></div>
     </div>
+    <div class="fila-form">
+      <div class="campo"><label>¿Es correcto? Corrígelo si hace falta (mm:ss)</label>
+        <input id="ocrCorreccion" value="${elegido?elegido.texto:''}" style="width:80px;text-align:center"></div>
+      <button class="btn btn-rojo" onclick="confirmarLecturaMarcador(${tVideo})">Confirmar este valor</button>
+    </div>
+    <p style="color:var(--muted);font-size:10px;line-height:1.5;margin-top:8px">Confirmar guarda este minuto
+      como referencia: las próximas lecturas dudosas se compararán con este valor y el tiempo de vídeo que haya
+      pasado, para acertar el formato aunque el separador o algún dígito no se lean bien.</p>
     <p style="color:var(--muted);font-size:11px;margin-top:12px">Si no ha acertado, prueba a recalibrar el
       recuadro ajustándolo más justo al reloj, o comprueba que el marcador se vea con claridad en ese punto del vídeo.</p>
     <div class="fila-form" style="margin-top:14px">
       <button class="btn" onclick="calibrarMarcador()">Recalibrar recuadro</button>
-      <button class="btn btn-rojo" onclick="leerMarcadorAhora()">Probar de nuevo</button>
+      <button class="btn" onclick="leerMarcadorAhora()">Probar de nuevo</button>
     </div>
   `);
+}
+
+function confirmarLecturaMarcador(tVideo){
+  const val=document.getElementById('ocrCorreccion').value.trim();
+  const m=val.match(/^(\d{1,2}):(\d{2})$/);
+  if(!m){ toast('Escribe el minuto en formato mm:ss, por ejemplo 12:34.'); return; }
+  estado.partido.marcadorOCR.ultimaLectura={tVideo, totalSeg:(+m[1])*60+(+m[2])};
+  guardar();
+  toast('Guardado como referencia · '+val+' en el vídeo '+tc(tVideo)+'.');
+  cerrarModal();
 }
 
 function bloqueMarcadorOCR(){
@@ -1503,8 +1572,7 @@ function aplicarProyecto(id,datos){
   estado.partido=datos.partido || estado.partido;
   estado.partido.id=id;
   if(!estado.partido.tFin) estado.partido.tFin={1:null,2:null}; // proyectos guardados antes de que existiera
-  if(!estado.partido.marcadorOCR) estado.partido.marcadorOCR={activo:false, region:null, cuentaAtras:true};
-  else if(estado.partido.marcadorOCR.cuentaAtras===undefined) estado.partido.marcadorOCR.cuentaAtras=true;
+  asegurarMarcadorOCR();
   estado.plantillaPropia=datos.plantillaPropia || [];
   estado.plantillaRival=datos.plantillaRival || [];
   estado.eventos=datos.eventos || [];
@@ -1600,7 +1668,7 @@ function nuevoProyecto(mantenerPropia){
     equipoPropio:estado.partido.equipoPropio||'CD Sporting FS Almería',
     equipoRival:'Rival', fecha:new Date().toISOString().slice(0,10),
     competicion:'', esRivalFuturo:false, fuenteVideo:null, refVideo:'', t0:{1:null,2:null}, tFin:{1:null,2:null},
-    marcadorOCR:{activo:false, region:null, cuentaAtras:true}
+    marcadorOCR:{activo:false, region:null, cuentaAtras:true, ultimaLectura:null}
   };
   estado.plantillaPropia=mantenerPropia? propiaActual : [];
   estado.plantillaRival=[];
@@ -3337,8 +3405,7 @@ document.getElementById('ficheroJson').onchange=e=>{
       // ningún panel, sus eventos se siguen viendo (con un color neutro de reserva).
       estado.partido=d.partido||estado.partido;
       if(!estado.partido.tFin) estado.partido.tFin={1:null,2:null};
-      if(!estado.partido.marcadorOCR) estado.partido.marcadorOCR={activo:false, region:null, cuentaAtras:true};
-      else if(estado.partido.marcadorOCR.cuentaAtras===undefined) estado.partido.marcadorOCR.cuentaAtras=true;
+      asegurarMarcadorOCR();
       estado.plantillaPropia=d.plantillaPropia||[];
       estado.plantillaRival=d.plantillaRival||[];
       estado.eventos=d.eventos||[];
