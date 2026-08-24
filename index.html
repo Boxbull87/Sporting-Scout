@@ -2104,6 +2104,10 @@ function categoriaGeneraClip(catId){
 
 function catsActivas(){ return estado.categorias.filter(c=>c.activa!==false); }
 function catsEnStats(){ return todasLasCategorias().filter(c=>c.stats!==false); }
+// Categorías marcadas para cruzarse con el quinteto en pista (checkbox "Cruzar con
+// quinteto" en el editor de categorías). Aparte para no meter de golpe todas las
+// categorías en la tabla por quinteto: la elige el coach una a una.
+function catsCruzanQuinteto(){ return todasLasCategorias().filter(c=>c.cruzaQuinteto); }
 
 function statsPorCategoria(eventos){
   const out={};
@@ -2117,6 +2121,50 @@ function statsPorCategoria(eventos){
 }
 function desgloseTexto(stat){
   return Object.entries(stat.resultados).map(([k,v])=>k+': '+v).join(' · ');
+}
+
+/* ---------- Estadísticas por quinteto ----------
+   Reconstruye, a partir de estado.cambiosQuinteto, qué cinco (o los que sean)
+   jugadores propios estaban en pista en cada tramo del partido, y cuenta ahí
+   los eventos de las categorías marcadas con "Cruzar con quinteto". Solo cuenta
+   eventos del equipo propio (el quinteto que se lleva es el tuyo, no el rival). */
+function intervalosQuinteto(){
+  const cambios=[...estado.cambiosQuinteto].sort((a,b)=>a.t-b.t);
+  const intervalos=[];
+  let actual=new Set(), tIni=0;
+  cambios.forEach(c=>{
+    if(c.t>tIni) intervalos.push({tIni, tFin:c.t, jugadores:[...actual]});
+    if(c.dentro) actual.add(c.jugadorId); else actual.delete(c.jugadorId);
+    tIni=c.t;
+  });
+  intervalos.push({tIni, tFin:Infinity, jugadores:[...actual]});
+  return intervalos;
+}
+function etiquetaQuinteto(ids){
+  return ids.map(id=>{
+    const j=estado.plantillaPropia.find(x=>x.id===id);
+    return {txt: j?'#'+j.dorsal:'#?', n: j?Number(j.dorsal):NaN};
+  }).sort((a,b)=> isNaN(a.n)||isNaN(b.n)? a.txt.localeCompare(b.txt) : a.n-b.n)
+    .map(x=>x.txt).join(' ');
+}
+function statsPorQuinteto(eventos){
+  const catsCruza = catsCruzanQuinteto();
+  if(!catsCruza.length || !estado.cambiosQuinteto.length) return {catsCruza, filas:[]};
+  const idsCruza = new Set(catsCruza.map(c=>c.id));
+  const intervalos = intervalosQuinteto();
+  const mapa = new Map();
+  eventos.forEach(ev=>{
+    if(ev.equipo!=='propio' || !idsCruza.has(ev.tipo)) return;
+    const iv = intervalos.find(x=>ev.t_mark>=x.tIni && ev.t_mark<x.tFin);
+    if(!iv || !iv.jugadores.length) return; // sin quinteto marcado en ese instante: no se cuenta
+    const key = [...iv.jugadores].sort().join(',');
+    if(!mapa.has(key)) mapa.set(key, {jugadores:iv.jugadores, porCategoria:{}, total:0});
+    const fila = mapa.get(key);
+    fila.porCategoria[ev.tipo] = (fila.porCategoria[ev.tipo]||0)+1;
+    fila.total++;
+  });
+  const filas = Array.from(mapa.values()).sort((a,b)=>b.total-a.total);
+  return {catsCruza, filas};
 }
 function eventosPorParte(eventos,parte){
   return parte==='todo'? eventos : eventos.filter(e=>e.parte===Number(parte));
@@ -2185,6 +2233,29 @@ function renderEstadisticas(parte){
 
   const cabecerasCat = catsStats.map(c=>`<th title="${c.nom}">${c.corto}</th>`).join('');
 
+  const {catsCruza, filas: filasQuinteto} = statsPorQuinteto(propio);
+  const cabecerasQuinteto = catsCruza.map(c=>`<th title="${c.nom}">${c.corto}</th>`).join('');
+  const filasQuintetoHtml = filasQuinteto.map(f=>{
+    const celdas = catsCruza.map(c=>`<td class="tc">${f.porCategoria[c.id]||'—'}</td>`).join('');
+    return `<tr><td>${etiquetaQuinteto(f.jugadores)}</td>${celdas}
+      <td class="tc" style="color:var(--muted)">${f.total}</td></tr>`;
+  }).join('');
+  let bloqueQuinteto;
+  if(!catsCruza.length){
+    bloqueQuinteto = '<p style="color:var(--muted);font-size:11px">Ninguna categoría está marcada para cruzar '+
+      'con el quinteto. Actívalo con "Cruzar con quinteto" al editar la categoría, en "Categorías".</p>';
+  } else if(!estado.cambiosQuinteto.length){
+    bloqueQuinteto = '<p style="color:var(--muted);font-size:11px">Todavía no has marcado ningún quinteto en '+
+      'pista (panel lateral) en este proyecto.</p>';
+  } else if(!filasQuinteto.length){
+    bloqueQuinteto = '<p style="color:var(--muted);font-size:11px">No hay eventos propios de esas categorías '+
+      'mientras había un quinteto marcado en este periodo.</p>';
+  } else {
+    bloqueQuinteto = `<div style="overflow-x:auto"><table class="tabla">
+      <thead><tr><th>Quinteto</th>${cabecerasQuinteto}<th>Total</th></tr></thead>
+      <tbody>${filasQuintetoHtml}</tbody></table></div>`;
+  }
+
   modal('Estadísticas · '+(parte==='todo'?'Todo el partido':parte+'ª parte'), `
     <div class="fila-form" style="margin-bottom:14px">
       <div class="campo"><label>Periodo</label>
@@ -2212,6 +2283,10 @@ function renderEstadisticas(parte){
       <thead><tr><th>Jugador</th><th>Equipo</th>${cabecerasCat}<th>Total</th></tr></thead>
       <tbody>${filasJugadores}</tbody></table></div>`
     : '<p style="color:var(--muted);font-size:11px">No hay eventos en este periodo.</p>'}
+
+    <h3 style="font-size:10px;letter-spacing:.15em;text-transform:uppercase;color:var(--muted);margin:18px 0 9px">
+      Por quinteto <span style="text-transform:none;letter-spacing:0;color:var(--muted)">(solo ${nomPropio})</span></h3>
+    ${bloqueQuinteto}
   `);
 }
 
@@ -2294,6 +2369,7 @@ function renderCategorias(){
     <td class="tc">${c.tecla}</td>
     <td>${c.modo==='manual'?'Manual (activar/parar)':'Auto ('+(c.pre||0)+'s / '+(c.post||0)+'s)'}</td>
     <td>${c.stats===false?'No':'Sí'}</td>
+    <td>${c.cruzaQuinteto?'Sí':'No'}</td>
     <td>${c.activa===false?'Inactiva':'Activa'}</td>
     <td style="text-align:right;white-space:nowrap">
       <button class="btn" style="padding:2px 8px" onclick="editandoCategoria='${c.id}';renderCategorias()">Editar</button>
@@ -2319,7 +2395,7 @@ function renderCategorias(){
     <h3 style="font-family:var(--display);font-size:16px;text-transform:uppercase;letter-spacing:.05em;margin-bottom:10px">
       Categorías de "${panelActivo?panelActivo.nombre:''}"</h3>
     <div style="overflow-x:auto"><table class="tabla" style="margin-bottom:16px">
-      <thead><tr><th>Nombre</th><th>Tecla</th><th>Modo</th><th>En estadísticas</th><th>Estado</th><th></th></tr></thead>
+      <thead><tr><th>Nombre</th><th>Tecla</th><th>Modo</th><th>En estadísticas</th><th>Quinteto</th><th>Estado</th><th></th></tr></thead>
       <tbody>${filas}</tbody>
     </table></div>
     <h3 style="font-family:var(--display);font-size:16px;text-transform:uppercase;letter-spacing:.05em;margin-bottom:10px">
@@ -2349,6 +2425,9 @@ function renderCategorias(){
       <label style="display:flex;align-items:center;gap:6px;font-size:12px">
         <input type="checkbox" id="cStats" ${!editando||editando.stats!==false?'checked':''}> Incluir en Estadísticas
       </label>
+      <label style="display:flex;align-items:center;gap:6px;font-size:12px" title="Cuenta esta categoría en la tabla de Estadísticas → Por quinteto (solo equipo propio)">
+        <input type="checkbox" id="cCruzaQuinteto" ${editando&&editando.cruzaQuinteto?'checked':''}> Cruzar con quinteto
+      </label>
       <button class="btn btn-rojo" onclick="guardarCategoria()">${editando?'Guardar cambios':'Añadir categoría'}</button>
       ${editando?'<button class="btn" onclick="editandoCategoria=null;renderCategorias()">Cancelar</button>':''}
     </div>
@@ -2364,6 +2443,7 @@ function guardarCategoria(){
   const post = Math.max(0, parseFloat(document.getElementById('cPost').value)||0);
   const resultados = document.getElementById('cResultados').value.split(',').map(s=>s.trim()).filter(Boolean);
   const stats = document.getElementById('cStats').checked;
+  const cruzaQuinteto = document.getElementById('cCruzaQuinteto').checked;
 
   if(!nom){ toast('Ponle un nombre a la categoría.'); return; }
   if(tecla.length!==1){ toast('La tecla debe ser un solo carácter.'); return; }
@@ -2376,10 +2456,10 @@ function guardarCategoria(){
 
   if(editandoCategoria){
     const c = estado.categorias.find(c=>c.id===editandoCategoria);
-    Object.assign(c,{nom,corto,tecla,color,modo,pre,post,resultados,stats});
+    Object.assign(c,{nom,corto,tecla,color,modo,pre,post,resultados,stats,cruzaQuinteto});
   } else {
     estado.categorias.push({id:idUnicoCategoria(nom), nom, corto, tecla, color, pre, post, modo,
-      resultados, stats, activa:true});
+      resultados, stats, cruzaQuinteto, activa:true});
   }
   editandoCategoria=null;
   guardarPanelActivo();
