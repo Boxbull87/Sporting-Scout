@@ -859,6 +859,39 @@ function calibrarMarcador(){
 // Recorta el fotograma actual a la región calibrada, lo agranda y lo pasa a
 // blanco/negro con un umbral simple — ayuda mucho al OCR con el tipo de texto
 // (normalmente blanco o de color, con contorno) de los marcadores incrustados.
+// Umbral automático (método de Otsu): en vez de un número fijo que corta
+// siempre igual, calcula el punto de corte que mejor separa "trazo" de
+// "fondo" en ESTE recorte en concreto. Con un número fijo, trazos finos y algo
+// más tenues (como la rayita diagonal del "1") se estaban perdiendo del todo
+// y solo quedaba el palito vertical — de ahí que se leyera mal.
+function umbralOtsu(datos){
+  const hist=new Array(256).fill(0);
+  let total=0;
+  for(let i=0;i<datos.length;i+=4){
+    const gris=Math.round(0.299*datos[i]+0.587*datos[i+1]+0.114*datos[i+2]);
+    hist[gris]++; total++;
+  }
+  let sumaTotal=0;
+  for(let t=0;t<256;t++) sumaTotal+=t*hist[t];
+  let sumaFondo=0, pesoFondo=0, mejorVar=0, umbral=140;
+  for(let t=0;t<256;t++){
+    pesoFondo+=hist[t];
+    if(pesoFondo===0) continue;
+    const pesoTrazo=total-pesoFondo;
+    if(pesoTrazo===0) break;
+    sumaFondo+=t*hist[t];
+    const mediaFondo=sumaFondo/pesoFondo, mediaTrazo=(sumaTotal-sumaFondo)/pesoTrazo;
+    const varianza=pesoFondo*pesoTrazo*(mediaFondo-mediaTrazo)*(mediaFondo-mediaTrazo);
+    if(varianza>mejorVar){ mejorVar=varianza; umbral=t; }
+  }
+  // Sesgado un poco a la baja: Otsu "puro" tiende a cortar justo en medio del
+  // propio trazo tenue cuando ese grupo de píxeles es pequeño frente al fondo
+  // (el caso típico de una rayita fina como la del "1"), perdiendo la mitad.
+  // Bajarlo así se traga algo más de ruido de fondo, pero eso lo compensa de
+  // sobra la lista de caracteres permitidos (solo dígitos, ":" y ".").
+  return Math.round(umbral*0.85);
+}
+
 function capturarRecorteMarcador(){
   const region=estado.partido.marcadorOCR.region;
   const video=document.getElementById('vidLocal');
@@ -874,9 +907,31 @@ function capturarRecorteMarcador(){
   ctx.drawImage(video, sx,sy,sw,sh, 0,0,cv.width,cv.height);
   const img=ctx.getImageData(0,0,cv.width,cv.height);
   const d=img.data;
-  for(let i=0;i<d.length;i+=4){
+  const w=cv.width, h=cv.height;
+
+  const umbral=umbralOtsu(d);
+  const esTrazo=new Uint8Array(w*h);
+  for(let i=0, p=0;i<d.length;i+=4, p++){
     const gris=0.299*d[i]+0.587*d[i+1]+0.114*d[i+2];
-    const v = gris>140? 255:0;
+    esTrazo[p] = gris>umbral? 1:0;
+  }
+  // Engrosa 1px los trazos (dilatación): reconecta rayitas finas (como la
+  // diagonal del "1") que el umbral pueda haber dejado a medias o partidas.
+  const engrosado=new Uint8Array(w*h);
+  for(let y=0;y<h;y++){
+    for(let x=0;x<w;x++){
+      const p=y*w+x;
+      if(esTrazo[p]){ engrosado[p]=1; continue; }
+      let vecino=0;
+      if(x>0 && esTrazo[p-1]) vecino=1;
+      else if(x<w-1 && esTrazo[p+1]) vecino=1;
+      else if(y>0 && esTrazo[p-w]) vecino=1;
+      else if(y<h-1 && esTrazo[p+w]) vecino=1;
+      engrosado[p]=vecino;
+    }
+  }
+  for(let i=0, p=0;i<d.length;i+=4, p++){
+    const v=engrosado[p]?255:0;
     d[i]=d[i+1]=d[i+2]=v;
   }
   ctx.putImageData(img,0,0);
