@@ -368,7 +368,10 @@ input:focus,select:focus,button:focus-visible{outline:2px solid var(--rojo);outl
       <div class="resultados" id="rapidaResultados"></div>
     </div>
     <div class="sec" style="flex:1">
-      <h3>Categorías</h3>
+      <div style="display:flex;align-items:center;justify-content:space-between;gap:6px;margin-bottom:9px">
+        <h3 style="margin-bottom:0">Categorías</h3>
+        <select id="selectorPanel" style="font-size:10px;padding:3px 5px;max-width:130px" title="Cambiar de panel"></select>
+      </div>
       <div class="cats" id="cats"></div>
     </div>
   </div>
@@ -446,7 +449,18 @@ const estado = {
     refVideo:'',               // nombre de archivo o id de YouTube
     t0:{1:null,2:null}         // segundo de vídeo en el que empieza cada parte
   },
-  categorias: CATEGORIAS_DEFECTO.map(c=>({...c, resultados:[...c.resultados]})),
+  // Paneles de categorías: cada uno es un juego de botones/teclas independiente
+  // (ej. "Ataque", "Defensa", "Solo estadísticas"), sincronizado a tu cuenta de
+  // Sporting. estado.categorias SIEMPRE apunta al array de categorías del panel
+  // activo (misma referencia, no una copia) — así todo el código que ya lee/edita
+  // estado.categorias sigue funcionando igual, solo que ahora "categorías" quiere
+  // decir "las del panel que tienes seleccionado". Se rellenan de verdad en
+  // arrancarApp(), esto es solo un valor de partida seguro antes de eso.
+  paneles: [{id:'panel_defecto', nombre:'General', tipo:'completo',
+    categorias: CATEGORIAS_DEFECTO.map(c=>({...c, resultados:[...c.resultados]}))}],
+  panelActivoId: 'panel_defecto',
+  get categorias(){ return this.paneles.find(p=>p.id===this.panelActivoId).categorias; },
+  set categorias(arr){ const p=this.paneles.find(p=>p.id===this.panelActivoId); if(p) p.categorias=arr; },
   enCurso:{},                  // categorías en modo manual con un evento abierto: {catId: evento}
   plantillaPropia:[],          // ← futuro: se cargará de la colección `plantilla` de Sporting
   plantillaRival:[],           // vive dentro del partido mientras el rival no se repita
@@ -747,7 +761,8 @@ function pintarTimeline(){
   const pxs=estado.pxs;
   const ancho=Math.max(dur*pxs, 400);
 
-  lienzo.style.setProperty('--carriles', estado.categorias.length);
+  const carriles = categoriasParaTimeline();
+  lienzo.style.setProperty('--carriles', carriles.length);
   lienzo.style.width=ancho+'px';
 
   lienzo.querySelectorAll('.carril,.ev,.tick').forEach(n=>n.remove());
@@ -761,9 +776,9 @@ function pintarTimeline(){
     regla.appendChild(d);
   }
 
-  // carriles por categoría (todas, activas o no: los eventos históricos de una
-  // categoría desactivada tienen que seguir viéndose)
-  estado.categorias.forEach((cat,i)=>{
+  // carriles: el panel activo (en orden) + cualquier otra categoría de otro panel
+  // que ya tenga eventos en este proyecto, para no perderlos al cambiar de panel
+  carriles.forEach((cat,i)=>{
     const c=document.createElement('div');
     c.className='carril'; c.style.top=(20+i*22)+'px';
     const n=document.createElement('span');
@@ -774,9 +789,9 @@ function pintarTimeline(){
 
   // eventos
   estado.eventos.forEach(ev=>{
-    const i=estado.categorias.findIndex(c=>c.id===ev.tipo);
+    const i=carriles.findIndex(c=>c.id===ev.tipo);
     if(i<0) return;
-    const cat=estado.categorias[i];
+    const cat=carriles[i];
     const d=document.createElement('div');
     d.className='ev'+(estado.seleccion===ev.id?' sel':'')+(ev.abierto?' abierta':'');
     d.dataset.id=ev.id;
@@ -802,7 +817,7 @@ function seleccionar(id){
 }
 
 function etiquetaEvento(ev){
-  const cat=estado.categorias.find(c=>c.id===ev.tipo);
+  const cat=todasLasCategorias().find(c=>c.id===ev.tipo);
   return [tc(ev.t_mark), cat?cat.nom:ev.tipo, ev.equipo==='propio'?'propio':'rival',
           etiquetaJugador(ev), ev.resultado||''].filter(Boolean).join(' · ');
 }
@@ -862,9 +877,10 @@ function tc(s){
    PERSISTENCIA LOCAL (IndexedDB, con export/import JSON como respaldo)
    Cada partido es un "proyecto" independiente en el store 'proyectos',
    guardado bajo su propio id (estado.partido.id) — ya no se pisan entre sí.
-   Las categorías son la excepción: viven en el store 'config' porque son tu
-   plantilla de marcaje (una configuración de la app), no datos de un partido
-   concreto, así que se comparten entre todos los proyectos.
+   Los paneles de categorías son la excepción: viven en el store 'config' (y se
+   sincronizan a Firestore, ver PANELES DE CATEGORÍAS) porque son tu plantilla de
+   marcaje asociada a tu cuenta, no datos de un partido concreto — se comparten
+   entre todos los proyectos y entre dispositivos.
    ===================================================================== */
 
 let db=null;
@@ -889,8 +905,16 @@ function guardar(){
       plantillaRival:estado.plantillaRival, eventos:estado.eventos,
       actualizado:new Date().toISOString()};
     db.transaction('proyectos','readwrite').objectStore('proyectos').put(datos, estado.partido.id);
+    guardarConfigLocal();
+  }catch(e){}
+}
+// Solo la parte de 'config' (paneles + qué proyecto es el último abierto). Aparte
+// de guardar(), se llama sola cada vez que se edita un panel/categoría.
+function guardarConfigLocal(){
+  if(!db) return;
+  try{
     db.transaction('config','readwrite').objectStore('config')
-      .put({categorias:estado.categorias, ultimoProyectoId:estado.partido.id}, 'global');
+      .put({paneles:estado.paneles, panelActivoId:estado.panelActivoId, ultimoProyectoId:estado.partido.id}, 'global');
   }catch(e){}
 }
 function cargarConfig(){
@@ -1028,7 +1052,7 @@ function nuevoProyecto(mantenerPropia){
 function exportarJSON(){
   const datos={
     version:2, exportado:new Date().toISOString(),
-    partido:estado.partido, categorias:estado.categorias, plantillaPropia:estado.plantillaPropia,
+    partido:estado.partido, categorias:todasLasCategorias(), plantillaPropia:estado.plantillaPropia,
     plantillaRival:estado.plantillaRival, eventos:estado.eventos
   };
   const blob=new Blob([JSON.stringify(datos,null,2)],{type:'application/json'});
@@ -1189,7 +1213,7 @@ async function sincronizarConFirestore(){
       // Se manda la definición de categorías (nombre/color/si cuenta en estadísticas) para que
       // quien lea esto desde fuera (ej. Sporting) sepa interpretar el campo "tipo" de cada evento
       // sin tener que duplicar esa lista a mano.
-      categorias: estado.categorias.map(c=>({id:c.id, nom:c.nom, color:c.color, stats:c.stats!==false})),
+      categorias: todasLasCategorias().map(c=>({id:c.id, nom:c.nom, color:c.color, stats:c.stats!==false})),
       actualizado: firebase.firestore.FieldValue.serverTimestamp()
     }, {merge:true});
 
@@ -1208,6 +1232,35 @@ async function sincronizarConFirestore(){
   }catch(err){
     toast('Error al sincronizar: '+err.message);
   }
+}
+
+/* =====================================================================
+   PANELES DE CATEGORÍAS (Firestore)
+   Cada panel es un documento en paneles_scouting, propiedad de un coachUid.
+   Se guardan automáticamente en la nube en cuanto editas algo (sin botón de
+   sincronizar aparte) — si falla por no haber conexión, el cambio se queda
+   igualmente en local (estado.paneles + IndexedDB) y no se pierde nada del
+   lado del marcaje; solo falla la subida a la nube, que avisa con un toast.
+   ===================================================================== */
+
+async function cargarPanelesDesdeFirestore(){
+  const snap = await sportingDb.collection('paneles_scouting').where('coachUid','==',sporting.uid).get();
+  return snap.docs.map(d=>({id:d.id, ...d.data()}));
+}
+function guardarPanelEnFirestore(panel){
+  if(!sporting.uid || !panel) return Promise.resolve();
+  return sportingDb.collection('paneles_scouting').doc(panel.id).set({
+    coachUid: sporting.uid, nombre:panel.nombre, tipo:panel.tipo, categorias:panel.categorias,
+    actualizado: firebase.firestore.FieldValue.serverTimestamp()
+  }, {merge:true}).catch(err=>{
+    toast('No se pudo guardar el panel en tu cuenta (¿sin conexión?): '+err.message);
+  });
+}
+function borrarPanelEnFirestore(id){
+  if(!sporting.uid) return Promise.resolve();
+  return sportingDb.collection('paneles_scouting').doc(id).delete().catch(err=>{
+    toast('No se pudo borrar el panel de tu cuenta (¿sin conexión?): '+err.message);
+  });
 }
 
 /* =====================================================================
@@ -1454,9 +1507,11 @@ function abrirEventos(){
   }
   const esLocal = Reproductor.tipo==='local';
   const filas = estado.eventos.map(ev=>{
-    const cat=estado.categorias.find(c=>c.id===ev.tipo) || {nom:ev.tipo,color:'#7E8CA0'};
+    const cat=todasLasCategorias().find(c=>c.id===ev.tipo) || {nom:ev.tipo,color:'#7E8CA0'};
+    const puedeClip = esLocal && categoriaGeneraClip(ev.tipo);
+    const tituloSinClip = categoriaGeneraClip(ev.tipo)? '' : 'title="Panel solo-estadísticas: sin clip"';
     return `<tr>
-      <td><input type="checkbox" class="chk-export" data-id="${ev.id}" ${esLocal?'checked':'disabled'}></td>
+      <td><input type="checkbox" class="chk-export" data-id="${ev.id}" ${puedeClip?'checked':'disabled'}></td>
       <td class="tc">${tc(ev.t_mark)}</td>
       <td><span class="pill" style="background:${cat.color}22;color:${cat.color}">${cat.nom}</span></td>
       <td>${ev.equipo==='propio'?'Propio':'Rival'}</td>
@@ -1473,7 +1528,7 @@ function abrirEventos(){
       </td>
       <td style="text-align:right;white-space:nowrap">
         <button class="btn" style="padding:2px 6px" onclick="irA(${ev.t_in})">Ver</button>
-        <button class="btn" style="padding:2px 6px" onclick="descargarClipUnico('${ev.id}')" ${esLocal?'':'disabled'}>Descargar</button>
+        <button class="btn" style="padding:2px 6px" onclick="descargarClipUnico('${ev.id}')" ${puedeClip?'':'disabled'} ${tituloSinClip}>Descargar</button>
         <button class="btn" style="padding:2px 6px" onclick="borrarEvento('${ev.id}')">Borrar</button>
       </td></tr>`;
   }).join('');
@@ -1537,7 +1592,7 @@ function limpiarNombre(s){
 }
 
 function nombreClip(ev,indice){
-  const cat=estado.categorias.find(c=>c.id===ev.tipo);
+  const cat=todasLasCategorias().find(c=>c.id===ev.tipo);
   const j=buscarJugador(ev.jugadorRef);
   const jugadorParte = j? 'd'+limpiarNombre(j.dorsal) : (ev.jugadorEtiqueta? limpiarNombre(ev.jugadorEtiqueta) : null);
   const partes=[String(indice).padStart(3,'0'), cat?cat.id:ev.tipo, ev.equipo,
@@ -1555,7 +1610,7 @@ function exportarClipsFFmpeg(formato){
   if(!ids.length){ toast('No has marcado ningún evento para exportar.'); return; }
   const modoExacto = document.getElementById('modoCorte').value==='exacto';
 
-  const eventos = estado.eventos.filter(e=>ids.includes(e.id)).sort((a,b)=>a.t_in-b.t_in);
+  const eventos = estado.eventos.filter(e=>ids.includes(e.id) && categoriaGeneraClip(e.tipo)).sort((a,b)=>a.t_in-b.t_in);
   const nombreVideo = estado.partido.refVideo || 'video.mp4';
   const nombreClips = 'clips_'+limpiarNombre(estado.partido.equipoRival||'partido');
   const refVar = formato==='bat' ? '%VIDEO%' : '$VIDEO';
@@ -1679,7 +1734,7 @@ async function capturarClip(ev){
 function abrirExportOverlay(){ document.getElementById('modalExport').classList.add('abierto'); }
 function cerrarExportOverlay(){ document.getElementById('modalExport').classList.remove('abierto'); }
 function actualizarExportOverlay(actual,total,ev){
-  const cat=estado.categorias.find(c=>c.id===ev.tipo);
+  const cat=todasLasCategorias().find(c=>c.id===ev.tipo);
   document.getElementById('expTitulo').textContent='Exportando clip '+actual+' de '+total+' · '+(cat?cat.nom:ev.tipo);
   document.getElementById('expBarra').max=total;
   document.getElementById('expBarra').value=actual-1;
@@ -1689,6 +1744,7 @@ async function descargarClipUnico(id){
   const ev=estado.eventos.find(e=>e.id===id);
   if(!ev) return;
   if(Reproductor.tipo!=='local'){ toast('Carga el vídeo local del partido.'); return; }
+  if(!categoriaGeneraClip(ev.tipo)){ toast('Esta categoría es de un panel "solo estadísticas": no genera clip.'); return; }
   if(!soportaDescargaDirecta()){ toast('Tu navegador no soporta la descarga directa. Usa Chrome o Edge actualizados, o el script FFmpeg.'); return; }
   cancelarExport=false;
   cerrarModal();
@@ -1710,7 +1766,7 @@ async function descargarClipsDirecto(){
   if(!soportaDescargaDirecta()){ toast('Tu navegador no soporta la descarga directa. Usa Chrome o Edge actualizados, o el script FFmpeg.'); return; }
   const ids=Array.from(document.querySelectorAll('.chk-export:checked')).map(c=>c.dataset.id);
   if(!ids.length){ toast('No has marcado ningún evento para exportar.'); return; }
-  const eventos=estado.eventos.filter(e=>ids.includes(e.id)).sort((a,b)=>a.t_in-b.t_in);
+  const eventos=estado.eventos.filter(e=>ids.includes(e.id) && categoriaGeneraClip(e.tipo)).sort((a,b)=>a.t_in-b.t_in);
 
   cancelarExport=false;
   cerrarModal();
@@ -1735,6 +1791,33 @@ async function descargarClipsDirecto(){
   toast(cancelarExport? 'Exportación cancelada · '+hechos+' clips descargados.' : 'Listo · '+hechos+' clips descargados.');
 }
 
+// Unión de las categorías de TODOS tus paneles (deduplicadas por id). Se usa para
+// resolver eventos ya marcados (timeline, lista de Eventos, estadísticas, nombres de
+// clip) sin importar qué panel tengas activo ahora mismo para marcar cosas nuevas.
+function todasLasCategorias(){
+  const vistas=new Set(), out=[];
+  estado.paneles.forEach(p=>p.categorias.forEach(c=>{
+    if(!vistas.has(c.id)){ vistas.add(c.id); out.push(c); }
+  }));
+  return out;
+}
+// Categorías a mostrar como carriles en la timeline: las del panel activo (en su
+// orden) más cualquier otra que ya tenga eventos marcados (de cuando tenías activo
+// otro panel), para no perder de vista eventos antiguos ni llenar la timeline de
+// carriles vacíos de paneles que ni siquiera has usado en este proyecto.
+function categoriasParaTimeline(){
+  const idsActivas=new Set(estado.categorias.map(c=>c.id));
+  const idsConEventos=new Set(estado.eventos.map(e=>e.tipo));
+  const otras=todasLasCategorias().filter(c=>!idsActivas.has(c.id) && idsConEventos.has(c.id));
+  return [...estado.categorias, ...otras];
+}
+// false si la categoría pertenece a un panel "solo estadísticas" (sin exportación
+// de clip) o si ya no se encuentra en ningún panel.
+function categoriaGeneraClip(catId){
+  const panel=estado.paneles.find(p=>p.categorias.some(c=>c.id===catId));
+  return !!panel && panel.tipo!=='estadisticas';
+}
+
 /* =====================================================================
    ESTADÍSTICAS
    Nunca se guardan agregados: todo se recalcula sobre estado.eventos
@@ -1742,7 +1825,7 @@ async function descargarClipsDirecto(){
    ===================================================================== */
 
 function catsActivas(){ return estado.categorias.filter(c=>c.activa!==false); }
-function catsEnStats(){ return estado.categorias.filter(c=>c.stats!==false); }
+function catsEnStats(){ return todasLasCategorias().filter(c=>c.stats!==false); }
 
 function statsPorCategoria(eventos){
   const out={};
@@ -1879,18 +1962,21 @@ function exportarEstadisticasCSV(parte){
 }
 
 /* =====================================================================
-   GESTIÓN DE CATEGORÍAS
-   Editables en directo: añadir, editar, y activar/desactivar (nunca se
-   borran de verdad, para no perder el significado de eventos ya marcados
-   con ellas). "stats" controla si cuentan en la tabla de Estadísticas;
-   una categoría con stats:false sigue funcionando para marcar vídeo, solo
-   que no aparece en los informes.
+   GESTIÓN DE CATEGORÍAS Y PANELES
+   Un panel es un juego de botones/teclas independiente (ej. "Ataque",
+   "Portero", "Solo estadísticas"), guardado en tu cuenta de Sporting.
+   estado.categorias siempre es "las categorías del panel activo" (ver el
+   getter en la definición de estado). Dentro de un panel, las categorías
+   nunca se borran de verdad al desactivarlas, para no perder el significado
+   de eventos ya marcados con ellas. "stats" controla si cuentan en la tabla
+   de Estadísticas; un panel de tipo "estadisticas" hace que NINGUNA de sus
+   categorías ofrezca exportar clip (solo marcan un punto en la timeline).
    ===================================================================== */
 
 function idUnicoCategoria(nombre){
   const base = limpiarNombre(nombre).toLowerCase() || 'cat';
   let id=base, n=2;
-  while(estado.categorias.some(c=>c.id===id)){ id=base+'_'+n; n++; }
+  while(todasLasCategorias().some(c=>c.id===id)){ id=base+'_'+n; n++; }
   return id;
 }
 
@@ -1902,6 +1988,28 @@ function abrirCategorias(){
 
 function renderCategorias(){
   const editando = editandoCategoria? estado.categorias.find(c=>c.id===editandoCategoria) : null;
+  const panelActivo = estado.paneles.find(p=>p.id===estado.panelActivoId);
+
+  const filasPaneles = estado.paneles.map(p=>{
+    const activo = p.id===estado.panelActivoId;
+    return `<tr${activo?' style="background:var(--panel-2)"':''}>
+      <td>${activo?'▶ ':''}${p.nombre}</td>
+      <td>
+        <select onchange="cambiarTipoPanel('${p.id}',this.value)" style="font-size:11px">
+          <option value="completo" ${p.tipo!=='estadisticas'?'selected':''}>Completo (con clips)</option>
+          <option value="estadisticas" ${p.tipo==='estadisticas'?'selected':''}>Solo estadísticas (sin clips)</option>
+        </select>
+      </td>
+      <td class="tc">${p.categorias.length}</td>
+      <td style="text-align:right;white-space:nowrap">
+        ${activo? '<span style="color:var(--muted);font-size:11px">Editando</span>'
+          : `<button class="btn" style="padding:2px 8px" onclick="cambiarPanel('${p.id}');renderCategorias()">Editar</button>`}
+        <button class="btn" style="padding:2px 8px" onclick="duplicarPanelDesdeForm('${p.id}')">Duplicar</button>
+        <button class="btn" style="padding:2px 8px" onclick="renombrarPanelDesdeForm('${p.id}')">Renombrar</button>
+        <button class="btn" style="padding:2px 8px" onclick="borrarPanelDesdeForm('${p.id}')" ${estado.paneles.length<=1?'disabled':''}>Borrar</button>
+      </td>
+    </tr>`;
+  }).join('');
 
   const filas = estado.categorias.map(c=>`<tr${c.activa===false?' style="opacity:.5"':''}>
     <td><span class="pill" style="background:${c.color}22;color:${c.color}">${c.nom}</span></td>
@@ -1916,10 +2024,22 @@ function renderCategorias(){
   </tr>`).join('');
 
   modal('Categorías', `
-    <div class="aviso">Las categorías controlan qué botones/teclas ves para marcar vídeo y qué aparece luego
-    en Estadísticas. Desactivar una categoría la quita del panel de marcaje y libera su tecla, pero conserva
-    los eventos ya grabados con ella — no se borra nada. Quita la marca de "Incluir en Estadísticas" para
-    categorías que solo quieres usar para generar clips de vídeo, sin que ensucien las tablas de números.</div>
+    <div class="aviso">Tus paneles se guardan en tu cuenta de Sporting — los tienes en cualquier
+    dispositivo en el que inicies sesión. Un panel "Solo estadísticas" marca en la línea de tiempo
+    igual que cualquier otro, pero ninguna de sus categorías ofrece exportar clip.</div>
+
+    <h3 style="font-family:var(--display);font-size:16px;text-transform:uppercase;letter-spacing:.05em;margin-bottom:10px">
+      Tus paneles</h3>
+    <div style="overflow-x:auto"><table class="tabla" style="margin-bottom:10px">
+      <thead><tr><th>Nombre</th><th>Tipo</th><th>Categorías</th><th></th></tr></thead>
+      <tbody>${filasPaneles}</tbody>
+    </table></div>
+    <div class="fila-form" style="margin-bottom:20px">
+      <button class="btn" onclick="crearPanelDesdeForm()">+ Nuevo panel</button>
+    </div>
+
+    <h3 style="font-family:var(--display);font-size:16px;text-transform:uppercase;letter-spacing:.05em;margin-bottom:10px">
+      Categorías de "${panelActivo?panelActivo.nombre:''}"</h3>
     <div style="overflow-x:auto"><table class="tabla" style="margin-bottom:16px">
       <thead><tr><th>Nombre</th><th>Tecla</th><th>Modo</th><th>En estadísticas</th><th>Estado</th><th></th></tr></thead>
       <tbody>${filas}</tbody>
@@ -1984,7 +2104,8 @@ function guardarCategoria(){
       resultados, stats, activa:true});
   }
   editandoCategoria=null;
-  guardar(); renderPanelCategorias(); renderCategorias();
+  guardarPanelActivo();
+  renderPanelCategorias(); renderCategorias();
   toast('Categoría guardada.');
 }
 
@@ -1992,12 +2113,86 @@ function toggleActivaCategoria(id){
   const c=estado.categorias.find(c=>c.id===id);
   if(!c) return;
   c.activa = c.activa===false? true : false;
-  guardar(); renderPanelCategorias(); renderCategorias();
+  guardarPanelActivo();
+  renderPanelCategorias(); renderCategorias();
+}
+
+// Persiste el panel activo (local + Firestore) tras cualquier edición de sus
+// categorías. estado.categorias ES panel.categorias (misma referencia), así que
+// los cambios ya están dentro de estado.paneles; solo hay que guardarlos.
+function guardarPanelActivo(){
+  guardarConfigLocal();
+  guardarPanelEnFirestore(estado.paneles.find(p=>p.id===estado.panelActivoId));
+}
+
+/* ---------- gestión de paneles (crear/duplicar/renombrar/tipo/borrar) ---------- */
+
+function crearPanelDesdeForm(){
+  const nombre = prompt('Nombre del panel nuevo (ej. "Ataque", "Portero"):');
+  if(!nombre || !nombre.trim()) return;
+  const id = sportingDb.collection('paneles_scouting').doc().id;
+  const panel = {id, nombre:nombre.trim(), tipo:'completo', categorias:[]};
+  estado.paneles.push(panel);
+  cambiarPanel(id);
+  guardarPanelEnFirestore(panel);
+  renderCategorias();
+  toast('Panel creado. Añade sus categorías abajo.');
+}
+function duplicarPanelDesdeForm(id){
+  const original = estado.paneles.find(p=>p.id===id);
+  if(!original) return;
+  const nombre = prompt('Nombre para la copia:', original.nombre+' (copia)');
+  if(!nombre || !nombre.trim()) return;
+  const nuevoId = sportingDb.collection('paneles_scouting').doc().id;
+  const panel = {id:nuevoId, nombre:nombre.trim(), tipo:original.tipo,
+    categorias: original.categorias.map(c=>({...c, resultados:[...c.resultados]}))};
+  estado.paneles.push(panel);
+  cambiarPanel(nuevoId);
+  guardarPanelEnFirestore(panel);
+  renderCategorias();
+  toast('Panel duplicado.');
+}
+function renombrarPanelDesdeForm(id){
+  const panel = estado.paneles.find(p=>p.id===id);
+  if(!panel) return;
+  const nombre = prompt('Nuevo nombre:', panel.nombre);
+  if(!nombre || !nombre.trim()) return;
+  panel.nombre = nombre.trim();
+  guardarConfigLocal();
+  guardarPanelEnFirestore(panel);
+  renderCategorias();
+  if(panel.id===estado.panelActivoId) renderSelectorPanel();
+}
+function cambiarTipoPanel(id, tipo){
+  const panel = estado.paneles.find(p=>p.id===id);
+  if(!panel) return;
+  panel.tipo = tipo;
+  guardarConfigLocal();
+  guardarPanelEnFirestore(panel);
+  renderCategorias();
+  if(id===estado.panelActivoId) renderSelectorPanel();
+}
+function borrarPanelDesdeForm(id){
+  if(estado.paneles.length<=1){ toast('No puedes borrar tu único panel.'); return; }
+  const panel = estado.paneles.find(p=>p.id===id);
+  if(!panel) return;
+  if(!confirm('¿Borrar el panel "'+panel.nombre+'" y sus '+panel.categorias.length+' categorías?\n\n'+
+    'Los eventos ya marcados con ellas NO se borran (siguen en tus proyectos), pero dejarás de poder '+
+    'editarlas o volver a usarlas para marcar.')) return;
+  estado.paneles = estado.paneles.filter(p=>p.id!==id);
+  if(estado.panelActivoId===id) cambiarPanel(estado.paneles[0].id);
+  else guardarConfigLocal();
+  borrarPanelEnFirestore(id);
+  renderCategorias();
+  toast('Panel borrado.');
 }
 
 function abrirAyuda(){
+  const panelActivo = estado.paneles.find(p=>p.id===estado.panelActivoId);
   const cats=catsActivas().map(c=>`<div class="atajo"><kbd>${c.tecla}</kbd> ${c.nom}${c.modo==='manual'?' (activar/parar)':''}</div>`).join('');
   modal('Atajos de teclado', `
+    <p style="color:var(--muted);font-size:11px;margin-bottom:12px">Panel activo: <b>${panelActivo?panelActivo.nombre:''}</b> —
+      cámbialo desde el desplegable junto a "Categorías", en el lateral.</p>
     <h3 style="font-size:10px;letter-spacing:.15em;text-transform:uppercase;color:var(--muted);margin-bottom:9px">
       Marcaje</h3>
     <div class="atajos">${cats}</div>
@@ -2043,6 +2238,26 @@ function renderPanelCategorias(){
     b.onclick=()=>marcar(c.id);
     cont.appendChild(b);
   });
+}
+
+// Selector compacto para cambiar de panel sin salir del marcaje (junto al título
+// "Categorías", en el lateral). El modal "Categorías" tiene su propia gestión
+// completa de paneles; esto es solo para intercambiar rápido mientras ves vídeo.
+function renderSelectorPanel(){
+  const sel=document.getElementById('selectorPanel');
+  if(!sel) return;
+  sel.innerHTML = estado.paneles.map(p=>
+    `<option value="${p.id}" ${p.id===estado.panelActivoId?'selected':''}>${p.nombre}${p.tipo==='estadisticas'?' (sin clip)':''}</option>`
+  ).join('');
+}
+function cambiarPanel(id){
+  const panel = estado.paneles.find(p=>p.id===id);
+  if(!panel) return;
+  estado.panelActivoId = id; // estado.categorias (getter) pasa a apuntar a panel.categorias solo
+  renderSelectorPanel();
+  renderPanelCategorias();
+  pintarTimeline();
+  guardarConfigLocal();
 }
 
 // fuente de vídeo
@@ -2101,6 +2316,7 @@ document.getElementById('btnProyectos').onclick=abrirProyectos;
 document.getElementById('btnPartido').onclick=abrirPartido;
 document.getElementById('btnPlantillas').onclick=abrirPlantillas;
 document.getElementById('btnCategorias').onclick=abrirCategorias;
+document.getElementById('selectorPanel').onchange=e=>cambiarPanel(e.target.value);
 document.getElementById('btnEventos').onclick=abrirEventos;
 document.getElementById('btnStats').onclick=abrirEstadisticas;
 document.getElementById('btnAyuda').onclick=abrirAyuda;
@@ -2117,8 +2333,10 @@ document.getElementById('ficheroJson').onchange=e=>{
   r.onload=()=>{
     try{
       const d=JSON.parse(r.result);
+      // Nota: no se tocan tus paneles/categorías al importar — son de tu cuenta, no
+      // de este archivo. Si el proyecto importado usa categorías que ya no tienes en
+      // ningún panel, sus eventos se siguen viendo (con un color neutro de reserva).
       estado.partido=d.partido||estado.partido;
-      estado.categorias=(d.categorias&&d.categorias.length)? d.categorias : estado.categorias;
       estado.plantillaPropia=d.plantillaPropia||[];
       estado.plantillaRival=d.plantillaRival||[];
       estado.eventos=d.eventos||[];
@@ -2170,7 +2388,32 @@ async function arrancarApp(){
   await abrirDB();
   await migrarProyectoLegado();
   const cfg = await cargarConfig();
-  if(cfg && cfg.categorias && cfg.categorias.length) estado.categorias=cfg.categorias;
+
+  // Paneles: la nube manda si hay conexión (es tu cuenta, no este navegador).
+  // Si falla (sin red), seguimos con la copia local para no dejarte sin poder marcar.
+  let panelesNube=null;
+  try{ panelesNube = await cargarPanelesDesdeFirestore(); }catch(e){ /* sin red: seguimos con lo local */ }
+
+  if(panelesNube && panelesNube.length){
+    estado.paneles = panelesNube;
+  } else if(cfg && cfg.paneles && cfg.paneles.length){
+    estado.paneles = cfg.paneles;
+  } else if(cfg && cfg.categorias && cfg.categorias.length){
+    // Migración desde el formato plano de antes de que existieran los paneles.
+    const id = sportingDb.collection('paneles_scouting').doc().id;
+    estado.paneles = [{id, nombre:'General', tipo:'completo', categorias:cfg.categorias}];
+    guardarPanelEnFirestore(estado.paneles[0]);
+  } else {
+    // Coach nuevo sin nada guardado todavía: sembramos con las categorías por defecto.
+    const id = sportingDb.collection('paneles_scouting').doc().id;
+    estado.paneles = [{id, nombre:'General', tipo:'completo',
+      categorias: CATEGORIAS_DEFECTO.map(c=>({...c, resultados:[...c.resultados]}))}];
+    guardarPanelEnFirestore(estado.paneles[0]);
+  }
+  estado.panelActivoId = (cfg && cfg.panelActivoId && estado.paneles.some(p=>p.id===cfg.panelActivoId))
+    ? cfg.panelActivoId : estado.paneles[0].id;
+  guardarConfigLocal();
+
   if(cfg && cfg.ultimoProyectoId){
     const p = await cargarProyecto(cfg.ultimoProyectoId);
     if(p){
@@ -2180,6 +2423,7 @@ async function arrancarApp(){
       }
     }
   }
+  renderSelectorPanel();
   renderPanelCategorias();
   pintarTimeline();
 }
