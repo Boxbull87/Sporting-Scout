@@ -90,7 +90,7 @@ input:focus,select:focus,button:focus-visible{outline:2px solid var(--rojo);outl
 .btn-rojo:hover{background:#E8353C;border-color:#E8353C}
 
 /* ---------- CUERPO ---------- */
-.cuerpo{flex:1;display:grid;grid-template-columns:1fr 306px;min-height:0}
+.cuerpo{flex:1;display:grid;grid-template-columns:1fr 6px 306px;min-height:0}
 .izq{display:flex;flex-direction:column;min-width:0;min-height:0}
 .video-zona{
   flex:1;position:relative;background:#000;display:flex;align-items:center;justify-content:center;
@@ -99,6 +99,28 @@ input:focus,select:focus,button:focus-visible{outline:2px solid var(--rojo);outl
 #vidLocal{width:100%;height:100%;object-fit:contain;display:none}
 #ytHost{width:100%;height:100%;display:none}
 #ytHost iframe{width:100%;height:100%}
+
+/* barra de tiempo tradicional (buscar/avanzar por todo el vídeo), separada
+   de la línea de tiempo de marcaje que hay debajo del transporte */
+.scrub{display:flex;align-items:center;gap:9px;padding:5px 12px;background:var(--panel);
+  border-top:1px solid var(--line);flex:none}
+.scrub-t{font-family:var(--display);font-variant-numeric:tabular-nums;font-size:12px;
+  color:var(--muted);min-width:36px;text-align:center}
+.scrub input[type=range]{flex:1;-webkit-appearance:none;appearance:none;height:4px;
+  border-radius:2px;background:var(--line);outline:none;cursor:pointer}
+.scrub input[type=range]:disabled{cursor:default;opacity:.45}
+.scrub input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:13px;height:13px;
+  margin-top:-4.5px;border-radius:50%;background:#fff;border:2px solid var(--rojo);cursor:pointer}
+.scrub input[type=range]::-moz-range-thumb{width:11px;height:11px;border-radius:50%;background:#fff;
+  border:2px solid var(--rojo);cursor:pointer}
+.scrub input[type=range]::-moz-range-track{height:4px;border-radius:2px;background:var(--line)}
+.scrub input[type=range]::-moz-range-progress{height:4px;border-radius:2px;background:var(--rojo)}
+
+/* tiradores para agrandar/achicar secciones (arrastrar con el ratón) */
+.resize-v{width:6px;flex:none;background:var(--line);cursor:col-resize}
+.resize-v:hover,.resize-v.arrastrando{background:var(--rojo)}
+.resize-h{height:6px;flex:none;background:var(--line);cursor:row-resize}
+.resize-h:hover,.resize-h.arrastrando{background:var(--rojo)}
 
 /* pantalla de carga de fuente */
 .fuente{
@@ -191,7 +213,7 @@ input:focus,select:focus,button:focus-visible{outline:2px solid var(--rojo);outl
 .tl-cab h3{font-family:var(--display);font-size:14px;font-weight:600;letter-spacing:.1em;
   text-transform:uppercase}
 .tl-cab .cuenta{color:var(--muted);font-size:11px}
-.tl-scroll{overflow-x:auto;overflow-y:hidden;position:relative}
+.tl-scroll{overflow-x:auto;overflow-y:auto;position:relative}
 .tl-lienzo{position:relative;height:calc(var(--carriles) * 22px + 20px);min-width:100%}
 .regla{position:absolute;top:0;left:0;right:0;height:20px;border-bottom:1px solid var(--line)}
 .tick{position:absolute;top:0;height:20px;border-left:1px solid var(--line);
@@ -251,6 +273,7 @@ input:focus,select:focus,button:focus-visible{outline:2px solid var(--rojo);outl
 @media(max-width:900px){
   .cuerpo{grid-template-columns:1fr;grid-template-rows:1fr auto}
   .lat{border-left:none;border-top:1px solid var(--line);max-height:44vh}
+  .resize-v{display:none}
 }
 @media(prefers-reduced-motion:reduce){*{transition:none!important;animation:none!important}}
 </style>
@@ -297,7 +320,7 @@ input:focus,select:focus,button:focus-visible{outline:2px solid var(--rojo);outl
   <button class="btn btn-rojo" id="btnSync">Sincronizar</button>
 </div>
 
-<div class="cuerpo">
+<div class="cuerpo" id="cuerpo">
   <div class="izq">
     <div class="video-zona" id="videoZona">
       <video id="vidLocal" playsinline></video>
@@ -315,6 +338,12 @@ input:focus,select:focus,button:focus-visible{outline:2px solid var(--rojo);outl
           <button class="btn" id="btnYt">Cargar de YouTube</button>
         </div>
       </div>
+    </div>
+
+    <div class="scrub" id="scrub">
+      <span class="scrub-t" id="scrubActual">00:00</span>
+      <input type="range" id="scrubBarra" min="0" max="0" step="0.1" value="0" disabled>
+      <span class="scrub-t" id="scrubTotal">00:00</span>
     </div>
 
     <div class="transporte">
@@ -341,6 +370,8 @@ input:focus,select:focus,button:focus-visible{outline:2px solid var(--rojo);outl
       <span id="estadoFuente" style="color:var(--muted);font-size:11px"></span>
     </div>
 
+    <div class="resize-h" id="resizeTl" title="Arrastra para agrandar o achicar la línea de tiempo (doble clic para restaurar)"></div>
+
     <div class="tl">
       <div class="tl-cab">
         <h3>Línea de tiempo</h3>
@@ -356,6 +387,8 @@ input:focus,select:focus,button:focus-visible{outline:2px solid var(--rojo);outl
       </div>
     </div>
   </div>
+
+  <div class="resize-v" id="resizeLat" title="Arrastra para agrandar o achicar el panel lateral (doble clic para restaurar)"></div>
 
   <div class="lat">
     <div class="sec">
@@ -501,6 +534,7 @@ const Reproductor = {
     if(handle) estado.partido.videoHandle=handle;
     document.getElementById('estadoFuente').textContent='Archivo local · '+file.name;
     v.onloadedmetadata=()=>{ pintarTimeline(); };
+    document.getElementById('scrubBarra').disabled=false;
     toast('Vídeo cargado. Puedes marcar y exportar clips.');
     guardar();
   },
@@ -515,6 +549,7 @@ const Reproductor = {
     estado.partido.fuenteVideo='youtube';
     estado.partido.refVideo=id;
     document.getElementById('estadoFuente').textContent='YouTube · '+id+' · sin exportación de clips';
+    document.getElementById('scrubBarra').disabled=false;
 
     const arranca=()=>{
       this.yt = new YT.Player('ytHost',{
@@ -845,7 +880,10 @@ function etiquetaJugador(ev, sinAsignar){
   return sinAsignar!==undefined? sinAsignar : '';
 }
 
-/* cabezal + reloj a 10 fps */
+/* cabezal + reloj + barra de tiempo a 10 fps. Mientras el usuario arrastra la
+   barra de tiempo con el ratón, no se toca su valor desde aquí (si no, el
+   propio arrastre se pelearía con la actualización automática). */
+let arrastrandoScrub=false;
 setInterval(()=>{
   if(!Reproductor.tipo) return;
   const t=Reproductor.tiempo();
@@ -858,6 +896,16 @@ setInterval(()=>{
   }else{
     document.getElementById('reloj').firstChild.textContent=tc(t);
     document.getElementById('relojEtq').textContent='vídeo';
+  }
+
+  if(!arrastrandoScrub){
+    const dur=Reproductor.duracion();
+    const barra=document.getElementById('scrubBarra');
+    barra.max=dur||0;
+    barra.value=t;
+    barra.style.background='linear-gradient(to right,var(--rojo) '+(dur? (t/dur*100):0)+'%,var(--line) 0)';
+    document.getElementById('scrubActual').textContent=tc(t);
+    document.getElementById('scrubTotal').textContent=tc(dur);
   }
 
   // autoscroll de la timeline siguiendo el cabezal
@@ -1035,6 +1083,13 @@ function resetReproductor(){
   document.getElementById('ytUrl').value='';
   document.getElementById('estadoFuente').textContent='';
   Reproductor.tipo=null; Reproductor.vid=null; Reproductor.yt=null; Reproductor.ytListo=false;
+
+  const barra=document.getElementById('scrubBarra');
+  barra.disabled=true; barra.value=0; barra.max=0;
+  barra.style.background='';
+  document.getElementById('scrubActual').textContent='00:00';
+  document.getElementById('scrubTotal').textContent='00:00';
+
   botonPlay();
   intentarReconectarVideo();
 }
@@ -2385,6 +2440,96 @@ document.getElementById('btnFrameA').onclick=()=>Reproductor.frame(-1);
 document.getElementById('btnFrameD').onclick=()=>Reproductor.frame(1);
 document.getElementById('velocidad').onchange=e=>Reproductor.velocidad(parseFloat(e.target.value));
 document.getElementById('zoom').onchange=e=>{ estado.pxs=parseInt(e.target.value); pintarTimeline(); };
+
+// barra de tiempo tradicional (buscar por todo el vídeo, como en YouTube). Mientras
+// se arrastra no se deja que el intervalo de 10fps le pise el valor (ver arrastrandoScrub).
+(function(){
+  const barra=document.getElementById('scrubBarra');
+  barra.addEventListener('pointerdown',()=>{ arrastrandoScrub=true; });
+  barra.addEventListener('input',()=>{
+    Reproductor.ir(parseFloat(barra.value));
+    document.getElementById('scrubActual').textContent=tc(parseFloat(barra.value));
+  });
+  const soltar=()=>{ arrastrandoScrub=false; };
+  barra.addEventListener('pointerup',soltar);
+  barra.addEventListener('change',soltar);
+})();
+
+/* =====================================================================
+   REDIMENSIONADO DE SECCIONES (arrastrar para agrandar/achicar)
+   Es una preferencia de interfaz de este navegador, no del proyecto ni de
+   la cuenta: se guarda en localStorage, no en Firestore ni en el JSON.
+   ===================================================================== */
+const LAYOUT_KEY='scoutingfs_layout';
+function cargarLayoutGuardado(){
+  try{ return JSON.parse(localStorage.getItem(LAYOUT_KEY))||{}; }catch(e){ return {}; }
+}
+function guardarLayout(cambios){
+  try{ localStorage.setItem(LAYOUT_KEY, JSON.stringify({...cargarLayoutGuardado(), ...cambios})); }catch(e){}
+}
+
+// tirador horizontal: agranda/achica la línea de tiempo (y con ello el vídeo,
+// que ocupa el espacio que quede libre por encima).
+(function(){
+  const tirador=document.getElementById('resizeTl');
+  const scroll=document.getElementById('tlScroll');
+  const izq=document.querySelector('.izq');
+  const guardado=cargarLayoutGuardado().tlAltura;
+  if(guardado) scroll.style.height=guardado+'px';
+
+  let y0=0, h0=0;
+  tirador.addEventListener('pointerdown',e=>{
+    y0=e.clientY; h0=scroll.offsetHeight;
+    tirador.classList.add('arrastrando');
+    tirador.setPointerCapture(e.pointerId);
+  });
+  tirador.addEventListener('pointermove',e=>{
+    if(!tirador.classList.contains('arrastrando')) return;
+    const min=60, max=Math.max(min, izq.getBoundingClientRect().height-160);
+    scroll.style.height=Math.min(max,Math.max(min, h0-(e.clientY-y0)))+'px';
+  });
+  tirador.addEventListener('pointerup',()=>{
+    if(!tirador.classList.contains('arrastrando')) return;
+    tirador.classList.remove('arrastrando');
+    guardarLayout({tlAltura:scroll.offsetHeight});
+  });
+  tirador.addEventListener('dblclick',()=>{
+    scroll.style.removeProperty('height');
+    guardarLayout({tlAltura:null});
+  });
+})();
+
+// tirador vertical: agranda/achica el panel lateral de categorías (y con ello
+// el vídeo, que ocupa el ancho que deje libre la columna de la izquierda).
+(function(){
+  const tirador=document.getElementById('resizeLat');
+  const cuerpo=document.getElementById('cuerpo');
+  let ancho=cargarLayoutGuardado().latAncho||306;
+  const aplicar=w=>{ cuerpo.style.gridTemplateColumns='1fr 6px '+w+'px'; };
+  aplicar(ancho);
+
+  let x0=0, w0=0;
+  tirador.addEventListener('pointerdown',e=>{
+    x0=e.clientX; w0=ancho;
+    tirador.classList.add('arrastrando');
+    tirador.setPointerCapture(e.pointerId);
+  });
+  tirador.addEventListener('pointermove',e=>{
+    if(!tirador.classList.contains('arrastrando')) return;
+    const min=220, max=Math.min(560, window.innerWidth-260);
+    ancho=Math.min(max,Math.max(min, w0+(x0-e.clientX)));
+    aplicar(ancho);
+  });
+  tirador.addEventListener('pointerup',()=>{
+    if(!tirador.classList.contains('arrastrando')) return;
+    tirador.classList.remove('arrastrando');
+    guardarLayout({latAncho:ancho});
+  });
+  tirador.addEventListener('dblclick',()=>{
+    ancho=306; aplicar(ancho);
+    guardarLayout({latAncho:null});
+  });
+})();
 
 // equipo activo
 document.getElementById('eqPropio').onclick=()=>cambiarEquipo('propio');
