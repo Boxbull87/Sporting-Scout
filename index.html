@@ -218,6 +218,20 @@ input:focus,select:focus,button:focus-visible{outline:2px solid var(--rojo);outl
 }
 .cat .franja{position:absolute;left:0;top:0;bottom:0;width:3px;border-radius:var(--radius) 0 0 var(--radius)}
 
+/* Densidad automática: cuando el panel de marcaje se achica y las categorías no
+   caben, en vez de recortarlas por abajo (hay que hacer scroll y no se ven todas
+   de golpe) se reducen los botones y se reparten en más columnas. Ver
+   ajustarDensidadCategorias(). */
+.cats-compacto .cats{grid-template-columns:repeat(3,1fr);gap:4px}
+.cats-compacto .cat{padding:6px 22px 5px 6px}
+.cats-compacto .cat b{font-size:12px}
+.cats-compacto .cat i{display:none}
+.cats-compacto .cat .tecla{font-size:10px;padding:0 3px;line-height:13px;top:3px;right:3px}
+.cats-mini .cats{grid-template-columns:repeat(4,1fr);gap:3px}
+.cats-mini .cat{padding:4px 16px 3px 5px}
+.cats-mini .cat b{font-size:10px;letter-spacing:0}
+.cats-mini .cat .tecla{font-size:9px;padding:0 2px;line-height:11px;top:2px;right:2px}
+
 /* asignación rápida */
 .rapida{padding:10px 11px;margin:9px 0 0;background:var(--panel-2);border-radius:var(--radius);display:none}
 .rapida.abierta{display:block}
@@ -2610,6 +2624,7 @@ function botonPlay(){
 function renderPanelCategorias(){
   pintarGridCategorias('cats', estado.panelActivoId);
   pintarGridCategorias('catsB', estado.panelActivoIdB);
+  ajustarDensidadCategorias();
 }
 function pintarGridCategorias(contId, panelId){
   const cont=document.getElementById(contId);
@@ -2624,6 +2639,24 @@ function pintarGridCategorias(contId, panelId){
     b.onclick=()=>marcar(c.id);
     cont.appendChild(b);
   });
+}
+
+// Si al achicar el panel de marcaje las categorías dejan de caber, en vez de
+// recortarlas por abajo (obligando a hacer scroll para ver el resto) se
+// achican los propios botones y se reparten en más columnas. Se prueba desde
+// el tamaño normal hacia abajo cada vez (no se queda "pegado" en compacto si
+// luego agrandas el panel otra vez).
+function ajustarDensidadCategorias(){
+  const marcaje=document.getElementById('marcaje');
+  const doble=document.querySelector('.doble-cat');
+  if(!marcaje || !doble) return;
+  marcaje.classList.remove('cats-compacto','cats-mini');
+  if(doble.scrollHeight > doble.clientHeight+1){
+    marcaje.classList.add('cats-compacto');
+    if(doble.scrollHeight > doble.clientHeight+1){
+      marcaje.classList.add('cats-mini');
+    }
+  }
 }
 
 // Selectores compactos para cambiar de panel sin salir del marcaje (encima de cada
@@ -2814,6 +2847,7 @@ function guardarLayout(cambios){
   const izq=document.querySelector('.izq');
   const guardado=cargarLayoutGuardado().marcajeAltura;
   if(guardado) marcaje.style.height=guardado+'px';
+  ajustarDensidadCategorias();
 
   let y0=0, h0=0;
   tirador.addEventListener('pointerdown',e=>{
@@ -2825,6 +2859,7 @@ function guardarLayout(cambios){
     if(!tirador.classList.contains('arrastrando')) return;
     const min=90, max=Math.max(min, izq.getBoundingClientRect().height-160);
     marcaje.style.height=Math.min(max,Math.max(min, h0-(e.clientY-y0)))+'px';
+    ajustarDensidadCategorias();
   });
   tirador.addEventListener('pointerup',()=>{
     if(!tirador.classList.contains('arrastrando')) return;
@@ -2834,6 +2869,7 @@ function guardarLayout(cambios){
   tirador.addEventListener('dblclick',()=>{
     marcaje.style.removeProperty('height');
     guardarLayout({marcajeAltura:null});
+    ajustarDensidadCategorias();
   });
 })();
 
