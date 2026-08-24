@@ -150,7 +150,7 @@ input:focus,select:focus,button:focus-visible{outline:2px solid var(--rojo);outl
 .tbtn.on{background:var(--rojo);border-color:var(--rojo)}
 .transporte label{color:var(--muted);font-size:11px;text-transform:uppercase;letter-spacing:.1em}
 
-/* ---------- PANEL DE MARCAJE ---------- */
+/* ---------- QUINTETO (lateral) ---------- */
 .lat{
   background:var(--panel);border-left:1px solid var(--line);display:flex;flex-direction:column;
   min-height:0;overflow-y:auto;
@@ -160,6 +160,30 @@ input:focus,select:focus,button:focus-visible{outline:2px solid var(--rojo);outl
   font-size:10px;font-weight:600;letter-spacing:.15em;text-transform:uppercase;
   color:var(--muted);margin-bottom:9px;
 }
+.sec .cuenta{font-family:var(--display);font-size:13px;font-weight:600;font-variant-numeric:tabular-nums}
+.quinteto-grid{display:flex;flex-direction:column;gap:5px}
+.jp{
+  display:flex;align-items:center;gap:8px;padding:7px 9px;border:1px solid var(--line);
+  border-radius:var(--radius);background:var(--panel-2);text-align:left;transition:background .1s;
+}
+.jp:hover{background:#252A33}
+.jp .jp-dorsal{font-family:var(--display);font-size:15px;font-weight:600;
+  font-variant-numeric:tabular-nums;min-width:22px;color:var(--muted)}
+.jp .jp-nombre{flex:1;font-size:12px}
+.jp .jp-estado{font-size:9px;letter-spacing:.08em;text-transform:uppercase;color:var(--muted)}
+.jp.en-pista{background:var(--ok);border-color:var(--ok)}
+.jp.en-pista .jp-dorsal,.jp.en-pista .jp-nombre,.jp.en-pista .jp-estado{color:#08130E}
+.qh-fila{display:flex;justify-content:space-between;gap:6px;padding:5px 0;
+  border-bottom:1px solid rgba(42,47,57,.5)}
+.qh-fila:last-child{border-bottom:none}
+.qh-fila:hover{color:var(--txt)}
+.qh-in{color:var(--ok)}
+.qh-out{color:var(--rojo)}
+
+/* ---------- PANEL DE MARCAJE (equipo, asignación rápida, doble panel de categorías) ---------- */
+.marcaje{background:var(--panel);border-top:1px solid var(--line);flex:none;
+  display:flex;flex-direction:column;min-height:90px;overflow:hidden}
+.marcaje-cab{padding:10px 12px 0;flex:none}
 .equipo-sw{display:grid;grid-template-columns:1fr 1fr;gap:6px}
 .equipo-sw button{
   padding:9px;border:1px solid var(--line);border-radius:var(--radius);background:var(--panel-2);
@@ -167,6 +191,13 @@ input:focus,select:focus,button:focus-visible{outline:2px solid var(--rojo);outl
 }
 .equipo-sw button.on{background:var(--rojo);border-color:var(--rojo)}
 .equipo-sw button.on.rival{background:#2E6FB7;border-color:#2E6FB7}
+
+.doble-cat{flex:1;min-height:0;overflow-y:auto;display:grid;grid-template-columns:1fr 1fr}
+.panel-cat{padding:11px 12px;display:flex;flex-direction:column;min-width:0}
+.panel-cat+.panel-cat{border-left:1px solid var(--line)}
+.panel-cat-cab{display:flex;align-items:center;justify-content:space-between;gap:6px;margin-bottom:9px}
+.panel-cat-cab h3{font-size:10px;font-weight:600;letter-spacing:.15em;text-transform:uppercase;color:var(--muted)}
+.panel-cat-cab select{font-size:10px;padding:3px 5px;max-width:130px}
 
 .cats{display:grid;grid-template-columns:1fr 1fr;gap:6px}
 .cat{
@@ -188,7 +219,7 @@ input:focus,select:focus,button:focus-visible{outline:2px solid var(--rojo);outl
 .cat .franja{position:absolute;left:0;top:0;bottom:0;width:3px;border-radius:var(--radius) 0 0 var(--radius)}
 
 /* asignación rápida */
-.rapida{padding:11px 12px;background:var(--panel-2);border-bottom:1px solid var(--line);display:none}
+.rapida{padding:10px 11px;margin:9px 0 0;background:var(--panel-2);border-radius:var(--radius);display:none}
 .rapida.abierta{display:block}
 .rapida h4{font-family:var(--display);font-size:15px;font-weight:600;text-transform:uppercase;
   letter-spacing:.04em;margin-bottom:8px}
@@ -274,6 +305,8 @@ input:focus,select:focus,button:focus-visible{outline:2px solid var(--rojo);outl
   .cuerpo{grid-template-columns:1fr;grid-template-rows:1fr auto}
   .lat{border-left:none;border-top:1px solid var(--line);max-height:44vh}
   .resize-v{display:none}
+  .doble-cat{grid-template-columns:1fr}
+  .panel-cat+.panel-cat{border-left:none;border-top:1px solid var(--line)}
 }
 @media(prefers-reduced-motion:reduce){*{transition:none!important;animation:none!important}}
 </style>
@@ -386,30 +419,54 @@ input:focus,select:focus,button:focus-visible{outline:2px solid var(--rojo);outl
         </div>
       </div>
     </div>
+
+    <div class="resize-h" id="resizeCat" title="Arrastra para agrandar o achicar el panel de marcaje (doble clic para restaurar)"></div>
+
+    <div class="marcaje" id="marcaje">
+      <div class="marcaje-cab">
+        <div class="equipo-sw" id="equipoSw">
+          <button id="eqPropio" class="on">Propio</button>
+          <button id="eqRival" class="rival">Rival</button>
+        </div>
+        <div class="rapida" id="rapida">
+          <h4 id="rapidaTitulo">Asignar</h4>
+          <div class="ajuste-tiempo" id="rapidaAjuste"></div>
+          <div class="dorsales" id="rapidaDorsales"></div>
+          <div class="resultados" id="rapidaResultados"></div>
+        </div>
+      </div>
+      <div class="doble-cat">
+        <div class="panel-cat">
+          <div class="panel-cat-cab">
+            <h3>Panel A</h3>
+            <select id="selectorPanel" title="Cambiar panel izquierdo"></select>
+          </div>
+          <div class="cats" id="cats"></div>
+        </div>
+        <div class="panel-cat">
+          <div class="panel-cat-cab">
+            <h3>Panel B</h3>
+            <select id="selectorPanelB" title="Cambiar panel derecho"></select>
+          </div>
+          <div class="cats" id="catsB"></div>
+        </div>
+      </div>
+    </div>
   </div>
 
   <div class="resize-v" id="resizeLat" title="Arrastra para agrandar o achicar el panel lateral (doble clic para restaurar)"></div>
 
   <div class="lat">
-    <div class="sec">
-      <h3>Equipo que marco</h3>
-      <div class="equipo-sw">
-        <button id="eqPropio" class="on">Propio</button>
-        <button id="eqRival" class="rival">Rival</button>
-      </div>
-    </div>
-    <div class="rapida" id="rapida">
-      <h4 id="rapidaTitulo">Asignar</h4>
-      <div class="ajuste-tiempo" id="rapidaAjuste"></div>
-      <div class="dorsales" id="rapidaDorsales"></div>
-      <div class="resultados" id="rapidaResultados"></div>
-    </div>
     <div class="sec" style="flex:1">
       <div style="display:flex;align-items:center;justify-content:space-between;gap:6px;margin-bottom:9px">
-        <h3 style="margin-bottom:0">Categorías</h3>
-        <select id="selectorPanel" style="font-size:10px;padding:3px 5px;max-width:130px" title="Cambiar de panel"></select>
+        <h3 style="margin-bottom:0">Quinteto en pista</h3>
+        <span class="cuenta" id="cuentaPista">0/5</span>
       </div>
-      <div class="cats" id="cats"></div>
+      <div class="quinteto-grid" id="quintetoGrid"></div>
+    </div>
+    <div class="sec">
+      <h3>Últimos cambios</h3>
+      <div id="quintetoHistorial" style="font-size:11px;color:var(--muted)">Sin cambios todavía.</div>
     </div>
   </div>
 </div>
@@ -496,12 +553,17 @@ const estado = {
   paneles: [{id:'panel_defecto', nombre:'General', tipo:'completo',
     categorias: CATEGORIAS_DEFECTO.map(c=>({...c, resultados:[...c.resultados]}))}],
   panelActivoId: 'panel_defecto',
+  // Segundo panel visible a la vez, debajo de la línea de tiempo, junto al de
+  // arriba (p.ej. uno para estrategia y otro para clips). null = solo un panel.
+  panelActivoIdB: null,
   get categorias(){ return this.paneles.find(p=>p.id===this.panelActivoId).categorias; },
   set categorias(arr){ const p=this.paneles.find(p=>p.id===this.panelActivoId); if(p) p.categorias=arr; },
   enCurso:{},                  // categorías en modo manual con un evento abierto: {catId: evento}
   plantillaPropia:[],          // ← futuro: se cargará de la colección `plantilla` de Sporting
   plantillaRival:[],           // vive dentro del partido mientras el rival no se repita
   eventos:[],
+  enPista:[],                  // ids (de plantillaPropia) en pista ahora mismo — vive en el proyecto
+  cambiosQuinteto:[],          // histórico de entradas/salidas: {id,partidoId,t,jugadorId,dentro}
   equipoActivo:'propio',
   parte:1,
   pxs:4,
@@ -667,7 +729,9 @@ function nuevoEvento(cat,t_in,t_out,t_mark){
 
 function marcar(catId){
   if(!Reproductor.tipo){ toast('Carga primero un vídeo.'); return; }
-  const cat = estado.categorias.find(c=>c.id===catId);
+  // Se busca en TODOS los paneles (no solo en el activo/A): con el panel B visible
+  // a la vez, la categoría pulsada puede pertenecer a cualquiera de los dos.
+  const cat = todasLasCategorias().find(c=>c.id===catId);
   if(!cat) return;
   const t = Reproductor.tiempo();
 
@@ -792,6 +856,72 @@ function ajustarTiempo(id,campo,delta,dentroDeRapida){
   pintarTimeline();
   if(dentroDeRapida) pintarAjuste(ev);
   else if(document.getElementById('modal').classList.contains('abierto')) abrirEventos();
+}
+
+/* =====================================================================
+   QUINTETO EN PISTA (lateral)
+   Selección libre jugador a jugador: tocas para meter/sacar del "en pista"
+   ahora mismo. Cada cambio queda registrado con su minuto de vídeo en
+   estado.cambiosQuinteto, para poder cruzar después qué quinteto estaba en
+   pista cuando ocurrió cada estadística. Solo el equipo propio (no el rival).
+   ===================================================================== */
+
+function alternarEnPista(id){
+  if(!estado.plantillaPropia.some(j=>j.id===id)) return;
+  const dentro = !estado.enPista.includes(id);
+  if(dentro) estado.enPista.push(id);
+  else estado.enPista = estado.enPista.filter(x=>x!==id);
+  estado.cambiosQuinteto.push({
+    id:'q_'+Date.now()+'_'+Math.random().toString(36).slice(2,7),
+    partidoId: estado.partido.id, t: Reproductor.tiempo(), jugadorId: id, dentro
+  });
+  renderQuinteto();
+  guardar();
+}
+
+function renderQuinteto(){
+  const cont=document.getElementById('quintetoGrid');
+  if(!cont) return;
+  cont.innerHTML='';
+  if(!estado.plantillaPropia.length){
+    cont.innerHTML='<span style="color:var(--muted);font-size:11px">Sin jugadores cargados · '+
+      '<button class="btn" style="padding:3px 7px" onclick="abrirPlantillas()">Añadir</button></span>';
+  } else {
+    estado.plantillaPropia.forEach(j=>{
+      const dentro = estado.enPista.includes(j.id);
+      const b=document.createElement('button');
+      b.className='jp'+(dentro?' en-pista':'');
+      b.innerHTML=`<span class="jp-dorsal">${j.dorsal}</span><span class="jp-nombre">${j.nombre||''}</span>
+        <span class="jp-estado">${dentro?'En pista':'Banquillo'}</span>`;
+      b.onclick=()=>alternarEnPista(j.id);
+      cont.appendChild(b);
+    });
+  }
+  const cuenta=document.getElementById('cuentaPista');
+  if(cuenta){
+    const n=estado.enPista.length;
+    cuenta.textContent=n+'/5';
+    cuenta.style.color = n===5? 'var(--ok)' : 'var(--warn)';
+  }
+  renderHistorialQuinteto();
+}
+
+function renderHistorialQuinteto(){
+  const cont=document.getElementById('quintetoHistorial');
+  if(!cont) return;
+  if(!estado.cambiosQuinteto.length){
+    cont.innerHTML='Sin cambios todavía.';
+    return;
+  }
+  const ultimos=[...estado.cambiosQuinteto].sort((a,b)=>b.t-a.t).slice(0,12);
+  cont.innerHTML = ultimos.map(c=>{
+    const j=estado.plantillaPropia.find(x=>x.id===c.jugadorId);
+    const nombre = j? '#'+j.dorsal+(j.nombre?' '+j.nombre:'') : '(jugador no encontrado)';
+    return `<div class="qh-fila" onclick="Reproductor.ir(${c.t})" title="Saltar a este momento">
+      <span class="${c.dentro?'qh-in':'qh-out'}">${c.dentro?'Entra':'Sale'} · ${nombre}</span>
+      <span>${tc(c.t)}</span>
+    </div>`;
+  }).join('');
 }
 
 /* =====================================================================
@@ -959,6 +1089,7 @@ function guardar(){
   try{
     const datos={partido:estado.partido, plantillaPropia:estado.plantillaPropia,
       plantillaRival:estado.plantillaRival, eventos:estado.eventos,
+      enPista:estado.enPista, cambiosQuinteto:estado.cambiosQuinteto,
       actualizado:new Date().toISOString()};
     db.transaction('proyectos','readwrite').objectStore('proyectos').put(datos, estado.partido.id);
     guardarConfigLocal();
@@ -970,7 +1101,8 @@ function guardarConfigLocal(){
   if(!db) return;
   try{
     db.transaction('config','readwrite').objectStore('config')
-      .put({paneles:estado.paneles, panelActivoId:estado.panelActivoId, ultimoProyectoId:estado.partido.id}, 'global');
+      .put({paneles:estado.paneles, panelActivoId:estado.panelActivoId, panelActivoIdB:estado.panelActivoIdB,
+        ultimoProyectoId:estado.partido.id}, 'global');
   }catch(e){}
 }
 function cargarConfig(){
@@ -1055,6 +1187,8 @@ function aplicarProyecto(id,datos){
   estado.plantillaPropia=datos.plantillaPropia || [];
   estado.plantillaRival=datos.plantillaRival || [];
   estado.eventos=datos.eventos || [];
+  estado.enPista=datos.enPista || [];
+  estado.cambiosQuinteto=datos.cambiosQuinteto || [];
   estado.seleccion=null;
   estado.pendiente=null;
   estado.enCurso={};
@@ -1149,6 +1283,8 @@ function nuevoProyecto(mantenerPropia){
   estado.plantillaPropia=mantenerPropia? propiaActual : [];
   estado.plantillaRival=[];
   estado.eventos=[];
+  estado.enPista=[];
+  estado.cambiosQuinteto=[];
   estado.seleccion=null;
   estado.pendiente=null;
   estado.enCurso={};
@@ -1163,7 +1299,8 @@ function exportarJSON(){
   const datos={
     version:2, exportado:new Date().toISOString(),
     partido:partidoExport, categorias:todasLasCategorias(), plantillaPropia:estado.plantillaPropia,
-    plantillaRival:estado.plantillaRival, eventos:estado.eventos
+    plantillaRival:estado.plantillaRival, eventos:estado.eventos,
+    enPista:estado.enPista, cambiosQuinteto:estado.cambiosQuinteto
   };
   const blob=new Blob([JSON.stringify(datos,null,2)],{type:'application/json'});
   const a=document.createElement('a');
@@ -1279,6 +1416,8 @@ async function cargarPlantillaDesdeSporting(teamId){
     return {id:d.id, dorsal: p.dorsal!=null? String(p.dorsal) : '?',
       nombre:p.name||'', posicion:p.position==='Portero'?'Portero':'Jugador', origenSporting:true};
   }).sort((a,b)=>(Number(a.dorsal)||99)-(Number(b.dorsal)||99));
+  // La plantilla se reemplaza entera: los ids en pista de antes ya no corresponden a nadie.
+  estado.enPista=[];
 }
 async function vincularJornada(jornadaId){
   const j = sporting.jornadas.find(x=>x.id===jornadaId);
@@ -1430,6 +1569,7 @@ function nuevoProyectoDesdeForm(){
   resetReproductor();
   renderPanelCategorias();
   pintarTimeline();
+  renderQuinteto();
   cerrarModal();
   toast('Proyecto nuevo creado.');
 }
@@ -1441,6 +1581,7 @@ async function abrirProyectoDesdeForm(id){
   resetReproductor();
   renderPanelCategorias();
   pintarTimeline();
+  renderQuinteto();
   cerrarModal();
   toast('Proyecto abierto · '+estado.eventos.length+' eventos.');
 }
@@ -1569,7 +1710,7 @@ async function cargarPlantillaDesdeSportingDesdeForm(){
   if(estado.plantillaPropia.length &&
      !confirm('Esto reemplaza la plantilla propia actual por la de Sporting. ¿Continuar?')) return;
   await cargarPlantillaDesdeSporting(sporting.teamId);
-  guardar(); abrirPlantillas();
+  guardar(); abrirPlantillas(); renderQuinteto();
   toast('Plantilla cargada desde Sporting · '+estado.plantillaPropia.length+' jugadores.');
 }
 function bloquePlantilla(tipo,titulo){
@@ -1600,13 +1741,14 @@ function anadirJugador(tipo){
     dorsal:d, nombre:document.getElementById('n_'+tipo).value.trim(),
     posicion:document.getElementById('p_'+tipo).value};
   (tipo==='propio'? estado.plantillaPropia : estado.plantillaRival).push(j);
-  guardar(); abrirPlantillas();
+  guardar(); abrirPlantillas(); renderQuinteto();
 }
 function borrarJugador(tipo,id){
   const lista = tipo==='propio'? estado.plantillaPropia : estado.plantillaRival;
   const i=lista.findIndex(j=>j.id===id);
   if(i>=0) lista.splice(i,1);
-  guardar(); abrirPlantillas();
+  if(tipo==='propio') estado.enPista=estado.enPista.filter(x=>x!==id);
+  guardar(); abrirPlantillas(); renderQuinteto();
 }
 
 // Se queda encendido entre aperturas del modal dentro de la misma sesión: si lo activas
@@ -1929,15 +2071,23 @@ function todasLasCategorias(){
   }));
   return out;
 }
-// Categorías a mostrar como carriles en la timeline: las del panel activo (en su
-// orden) más cualquier otra que ya tenga eventos marcados (de cuando tenías activo
-// otro panel), para no perder de vista eventos antiguos ni llenar la timeline de
-// carriles vacíos de paneles que ni siquiera has usado en este proyecto.
+// Categorías activas de un panel concreto (o [] si el panel no existe / es null,
+// p.ej. cuando el panel B todavía no se ha elegido).
+function catsActivasDePanel(panelId){
+  const panel = estado.paneles.find(p=>p.id===panelId);
+  return panel? panel.categorias.filter(c=>c.activa!==false) : [];
+}
+// Categorías a mostrar como carriles en la timeline: las de los paneles activos
+// (A y, si lo hay, B — en su orden) más cualquier otra que ya tenga eventos
+// marcados (de cuando tenías activo otro panel), para no perder de vista eventos
+// antiguos ni llenar la timeline de carriles vacíos de paneles sin usar.
 function categoriasParaTimeline(){
-  const idsActivas=new Set(estado.categorias.map(c=>c.id));
+  const activasAB=[...catsActivasDePanel(estado.panelActivoId), ...catsActivasDePanel(estado.panelActivoIdB)];
+  const vistas=new Set(), base=[];
+  activasAB.forEach(c=>{ if(!vistas.has(c.id)){ vistas.add(c.id); base.push(c); } });
   const idsConEventos=new Set(estado.eventos.map(e=>e.tipo));
-  const otras=todasLasCategorias().filter(c=>!idsActivas.has(c.id) && idsConEventos.has(c.id));
-  return [...estado.categorias, ...otras];
+  const otras=todasLasCategorias().filter(c=>!vistas.has(c.id) && idsConEventos.has(c.id));
+  return [...base, ...otras];
 }
 // false si la categoría pertenece a un panel "solo estadísticas" (sin exportación
 // de clip) o si ya no se encuentra en ningún panel.
@@ -2289,7 +2439,7 @@ function renombrarPanelDesdeForm(id){
   guardarConfigLocal();
   guardarPanelEnFirestore(panel);
   renderCategorias();
-  if(panel.id===estado.panelActivoId) renderSelectorPanel();
+  if(panel.id===estado.panelActivoId || panel.id===estado.panelActivoIdB) renderSelectorPanel();
 }
 function cambiarTipoPanel(id, tipo){
   const panel = estado.paneles.find(p=>p.id===id);
@@ -2298,7 +2448,7 @@ function cambiarTipoPanel(id, tipo){
   guardarConfigLocal();
   guardarPanelEnFirestore(panel);
   renderCategorias();
-  if(id===estado.panelActivoId) renderSelectorPanel();
+  if(id===estado.panelActivoId || id===estado.panelActivoIdB) renderSelectorPanel();
 }
 function borrarPanelDesdeForm(id){
   if(estado.paneles.length<=1){ toast('No puedes borrar tu único panel.'); return; }
@@ -2308,22 +2458,39 @@ function borrarPanelDesdeForm(id){
     'Los eventos ya marcados con ellas NO se borran (siguen en tus proyectos), pero dejarás de poder '+
     'editarlas o volver a usarlas para marcar.')) return;
   estado.paneles = estado.paneles.filter(p=>p.id!==id);
+  if(estado.panelActivoIdB===id) estado.panelActivoIdB=null;
   if(estado.panelActivoId===id) cambiarPanel(estado.paneles[0].id);
-  else guardarConfigLocal();
+  else { renderSelectorPanel(); renderPanelCategorias(); pintarTimeline(); guardarConfigLocal(); }
   borrarPanelEnFirestore(id);
   renderCategorias();
   toast('Panel borrado.');
 }
 
 function abrirAyuda(){
-  const panelActivo = estado.paneles.find(p=>p.id===estado.panelActivoId);
-  const cats=catsActivas().map(c=>`<div class="atajo"><kbd>${c.tecla}</kbd> ${c.nom}${c.modo==='manual'?' (activar/parar)':''}</div>`).join('');
+  const panelA = estado.paneles.find(p=>p.id===estado.panelActivoId);
+  const panelB = estado.paneles.find(p=>p.id===estado.panelActivoIdB);
+  const catsA = catsActivasDePanel(estado.panelActivoId);
+  const catsB = catsActivasDePanel(estado.panelActivoIdB);
+  const filaCat=(c,tecla)=>`<div class="atajo">${tecla} ${c.nom}${c.modo==='manual'?' (activar/parar)':''}</div>`;
+  const listaA = catsA.map(c=>filaCat(c, `<kbd>${c.tecla}</kbd>`)).join('');
+  const listaB = catsB.map(c=>{
+    const colisiona = catsA.some(a=>a.tecla===c.tecla);
+    return filaCat(c, colisiona? `<kbd>Shift</kbd>+<kbd>${c.tecla}</kbd>` : `<kbd>${c.tecla}</kbd>`);
+  }).join('');
+
   modal('Atajos de teclado', `
-    <p style="color:var(--muted);font-size:11px;margin-bottom:12px">Panel activo: <b>${panelActivo?panelActivo.nombre:''}</b> —
-      cámbialo desde el desplegable junto a "Categorías", en el lateral.</p>
+    <p style="color:var(--muted);font-size:11px;margin-bottom:12px">Panel A: <b>${panelA?panelA.nombre:''}</b>
+      ${panelB? ' · Panel B: <b>'+panelB.nombre+'</b>' : ' (sin panel B activo)'} —
+      cámbialos desde los desplegables debajo de la línea de tiempo.</p>
     <h3 style="font-size:10px;letter-spacing:.15em;text-transform:uppercase;color:var(--muted);margin-bottom:9px">
-      Marcaje</h3>
-    <div class="atajos">${cats}</div>
+      Marcaje · Panel A</h3>
+    <div class="atajos">${listaA}</div>
+    ${panelB? `
+    <h3 style="font-size:10px;letter-spacing:.15em;text-transform:uppercase;color:var(--muted);margin:14px 0 3px">
+      Marcaje · Panel B</h3>
+    <p style="color:var(--muted);font-size:10px;margin-bottom:9px">Si una tecla coincide con el panel A, la del
+      panel B pasa a ser Shift+tecla.</p>
+    <div class="atajos">${listaB}</div>` : ''}
     <h3 style="font-size:10px;letter-spacing:.15em;text-transform:uppercase;color:var(--muted);margin:18px 0 9px">
       Reproducción</h3>
     <div class="atajos">
@@ -2354,10 +2521,16 @@ function botonPlay(){
 
 // panel de categorías: se repinta al arrancar y cada vez que se editan
 // categorías desde el modal "Categorías" (añadir/editar/activar/desactivar).
+// Dibuja los dos paneles a la vez (A y B, debajo de la línea de tiempo).
 function renderPanelCategorias(){
-  const cont=document.getElementById('cats');
+  pintarGridCategorias('cats', estado.panelActivoId);
+  pintarGridCategorias('catsB', estado.panelActivoIdB);
+}
+function pintarGridCategorias(contId, panelId){
+  const cont=document.getElementById(contId);
+  if(!cont) return;
   cont.innerHTML='';
-  catsActivas().forEach(c=>{
+  catsActivasDePanel(panelId).forEach(c=>{
     const b=document.createElement('button');
     b.className='cat'; b.dataset.cat=c.id;
     b.innerHTML=`<span class="franja" style="background:${c.color}"></span>
@@ -2368,20 +2541,37 @@ function renderPanelCategorias(){
   });
 }
 
-// Selector compacto para cambiar de panel sin salir del marcaje (junto al título
-// "Categorías", en el lateral). El modal "Categorías" tiene su propia gestión
-// completa de paneles; esto es solo para intercambiar rápido mientras ves vídeo.
+// Selectores compactos para cambiar de panel sin salir del marcaje (encima de cada
+// una de las dos columnas, debajo de la línea de tiempo). El modal "Categorías"
+// tiene su propia gestión completa de paneles; esto es solo para intercambiar
+// rápido mientras ves vídeo. El B admite "— Ninguno —" para dejar un solo panel.
 function renderSelectorPanel(){
-  const sel=document.getElementById('selectorPanel');
-  if(!sel) return;
-  sel.innerHTML = estado.paneles.map(p=>
-    `<option value="${p.id}" ${p.id===estado.panelActivoId?'selected':''}>${p.nombre}${p.tipo==='estadisticas'?' (sin clip)':''}</option>`
+  const selA=document.getElementById('selectorPanel');
+  const selB=document.getElementById('selectorPanelB');
+  if(!selA) return;
+  const opciones = estado.paneles.map(p=>
+    `<option value="${p.id}">${p.nombre}${p.tipo==='estadisticas'?' (sin clip)':''}</option>`
   ).join('');
+  selA.innerHTML = opciones;
+  selA.value = estado.panelActivoId;
+  if(selB){
+    selB.innerHTML = '<option value="">— Ninguno —</option>' + opciones;
+    selB.value = estado.panelActivoIdB || '';
+  }
 }
 function cambiarPanel(id){
   const panel = estado.paneles.find(p=>p.id===id);
   if(!panel) return;
   estado.panelActivoId = id; // estado.categorias (getter) pasa a apuntar a panel.categorias solo
+  renderSelectorPanel();
+  renderPanelCategorias();
+  pintarTimeline();
+  guardarConfigLocal();
+}
+// Panel B: igual que cambiarPanel pero para el segundo panel visible a la vez.
+// id vacío/null = quitar el panel B y dejar solo el A.
+function cambiarPanelB(id){
+  estado.panelActivoIdB = id || null;
   renderSelectorPanel();
   renderPanelCategorias();
   pintarTimeline();
@@ -2531,6 +2721,37 @@ function guardarLayout(cambios){
   });
 })();
 
+// tirador horizontal: agranda/achica el panel de marcaje (equipo + asignación
+// rápida + los dos paneles de categorías), debajo de la línea de tiempo.
+(function(){
+  const tirador=document.getElementById('resizeCat');
+  const marcaje=document.getElementById('marcaje');
+  const izq=document.querySelector('.izq');
+  const guardado=cargarLayoutGuardado().marcajeAltura;
+  if(guardado) marcaje.style.height=guardado+'px';
+
+  let y0=0, h0=0;
+  tirador.addEventListener('pointerdown',e=>{
+    y0=e.clientY; h0=marcaje.offsetHeight;
+    tirador.classList.add('arrastrando');
+    tirador.setPointerCapture(e.pointerId);
+  });
+  tirador.addEventListener('pointermove',e=>{
+    if(!tirador.classList.contains('arrastrando')) return;
+    const min=90, max=Math.max(min, izq.getBoundingClientRect().height-160);
+    marcaje.style.height=Math.min(max,Math.max(min, h0-(e.clientY-y0)))+'px';
+  });
+  tirador.addEventListener('pointerup',()=>{
+    if(!tirador.classList.contains('arrastrando')) return;
+    tirador.classList.remove('arrastrando');
+    guardarLayout({marcajeAltura:marcaje.offsetHeight});
+  });
+  tirador.addEventListener('dblclick',()=>{
+    marcaje.style.removeProperty('height');
+    guardarLayout({marcajeAltura:null});
+  });
+})();
+
 // equipo activo
 document.getElementById('eqPropio').onclick=()=>cambiarEquipo('propio');
 document.getElementById('eqRival').onclick=()=>cambiarEquipo('rival');
@@ -2558,6 +2779,7 @@ document.getElementById('btnPartido').onclick=abrirPartido;
 document.getElementById('btnPlantillas').onclick=abrirPlantillas;
 document.getElementById('btnCategorias').onclick=abrirCategorias;
 document.getElementById('selectorPanel').onchange=e=>cambiarPanel(e.target.value);
+document.getElementById('selectorPanelB').onchange=e=>cambiarPanelB(e.target.value);
 document.getElementById('btnEventos').onclick=abrirEventos;
 document.getElementById('btnStats').onclick=abrirEstadisticas;
 document.getElementById('btnAyuda').onclick=abrirAyuda;
@@ -2581,8 +2803,10 @@ document.getElementById('ficheroJson').onchange=e=>{
       estado.plantillaPropia=d.plantillaPropia||[];
       estado.plantillaRival=d.plantillaRival||[];
       estado.eventos=d.eventos||[];
+      estado.enPista=d.enPista||[];
+      estado.cambiosQuinteto=d.cambiosQuinteto||[];
       estado.enCurso={};
-      guardar(); renderPanelCategorias(); pintarTimeline();
+      guardar(); renderPanelCategorias(); pintarTimeline(); renderQuinteto();
       toast('Proyecto importado · '+estado.eventos.length+' eventos. Vuelve a cargar el vídeo.');
     }catch(err){ toast('Ese archivo no tiene el formato esperado.'); }
   };
@@ -2600,6 +2824,15 @@ document.getElementById('tlScroll').onclick=e=>{
   Reproductor.ir((e.clientX-r.left)/estado.pxs);
 };
 
+// Tecla física de base, ignorando Shift (p.ej. Shift+1 da e.key='!' en muchos
+// teclados, pero e.code sigue siendo 'Digit1'). Se usa solo para resolver colisiones
+// de tecla rápida entre el panel A y el B — ver keydown más abajo.
+function teclaBase(e){
+  const d=/^Digit(\d)$/.exec(e.code); if(d) return d[1];
+  const l=/^Key([A-Z])$/.exec(e.code); if(l) return l[1].toLowerCase();
+  return e.key;
+}
+
 // teclado
 document.addEventListener('keydown',e=>{
   if(/INPUT|SELECT|TEXTAREA/.test(e.target.tagName)) return;
@@ -2607,7 +2840,22 @@ document.addEventListener('keydown',e=>{
   if(e.key==='Escape'){ cerrarModal(); return; }
   if(document.getElementById('modal').classList.contains('abierto')) return;
 
-  const cat=catsActivas().find(c=>c.tecla===e.key);
+  // Paneles A y B pueden tener teclas repetidas (p.ej. las dos usan "1"). Primero
+  // se intenta la coincidencia normal (tal cual se pulsó, como toda la vida) tanto
+  // en A como en B; si las DOS coinciden a la vez es que hay colisión real, y ahí
+  // decide Shift (sin Shift = A, con Shift = B). Si no hay coincidencia directa pero
+  // se pulsó Shift, se prueba también con la tecla física de base (ver teclaBase) por
+  // si la colisión es en dígitos/letras cuyo carácter cambia al mantener Shift.
+  const catsA=catsActivasDePanel(estado.panelActivoId), catsB=catsActivasDePanel(estado.panelActivoIdB);
+  const enADirecta=catsA.find(c=>c.tecla===e.key), enBDirecta=catsB.find(c=>c.tecla===e.key);
+  let cat=null;
+  if(enADirecta && enBDirecta) cat = e.shiftKey? enBDirecta : enADirecta;
+  else if(enADirecta || enBDirecta) cat = enADirecta || enBDirecta;
+  else if(e.shiftKey){
+    const base=teclaBase(e);
+    const enABase=catsA.find(c=>c.tecla===base), enBBase=catsB.find(c=>c.tecla===base);
+    if(enABase && enBBase) cat = enBBase;
+  }
   if(cat){ e.preventDefault(); marcar(cat.id); return; }
 
   switch(e.key){
@@ -2653,6 +2901,8 @@ async function arrancarApp(){
   }
   estado.panelActivoId = (cfg && cfg.panelActivoId && estado.paneles.some(p=>p.id===cfg.panelActivoId))
     ? cfg.panelActivoId : estado.paneles[0].id;
+  estado.panelActivoIdB = (cfg && cfg.panelActivoIdB && estado.paneles.some(p=>p.id===cfg.panelActivoIdB))
+    ? cfg.panelActivoIdB : null;
   guardarConfigLocal();
 
   if(cfg && cfg.ultimoProyectoId){
@@ -2668,6 +2918,7 @@ async function arrancarApp(){
   renderSelectorPanel();
   renderPanelCategorias();
   pintarTimeline();
+  renderQuinteto();
 }
 </script>
 </body>
