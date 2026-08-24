@@ -888,9 +888,21 @@ function umbralOtsu(datos){
   // Sesgado un poco a la baja: Otsu "puro" tiende a cortar justo en medio del
   // propio trazo tenue cuando ese grupo de píxeles es pequeño frente al fondo
   // (el caso típico de una rayita fina como la del "1"), perdiendo la mitad.
-  // Bajarlo así se traga algo más de ruido de fondo, pero eso lo compensa de
-  // sobra la lista de caracteres permitidos (solo dígitos, ":" y ".").
-  return Math.round(umbral*0.85);
+  // PERO si el fondo del marcador no es negro puro (una caja semitransparente,
+  // por ejemplo), bajar demasiado el umbral puede acabar contando ese fondo
+  // como si fuera trazo — y entonces todo el marcador se funde en un único
+  // bloque en vez de separarse en dígitos. El texto real de un marcador nunca
+  // ocupa más de la mitad de los píxeles del recorte, así que si al bajar el
+  // umbral se pasa de ahí, se deja de bajar (se usa el histograma ya
+  // calculado arriba, sin volver a recorrer los píxeles).
+  const proporcionTrazo=u=>{
+    let n=0;
+    for(let t=u+1;t<256;t++) n+=hist[t];
+    return n/total;
+  };
+  let candidato=Math.round(umbral*0.85);
+  while(candidato<umbral && proporcionTrazo(candidato)>0.5) candidato++;
+  return candidato;
 }
 
 // Engrosa 1px los trazos, pero SOLO en vertical (arriba/abajo): reconecta
