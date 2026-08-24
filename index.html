@@ -892,6 +892,25 @@ function umbralOtsu(datos){
   return Math.round(umbral*0.85);
 }
 
+// Engrosa 1px los trazos, pero SOLO en vertical (arriba/abajo): reconecta
+// rayitas finas cortadas a medias (como la diagonal del "1") sin unir por
+// los lados dígitos que están simplemente pegados uno al otro (p.ej. "11" o
+// "111"), que es justo lo que pasaba engrosando también en horizontal.
+function engrosarVertical(esTrazo, w, h){
+  const engrosado=new Uint8Array(w*h);
+  for(let y=0;y<h;y++){
+    for(let x=0;x<w;x++){
+      const p=y*w+x;
+      if(esTrazo[p]){ engrosado[p]=1; continue; }
+      let vecino=0;
+      if(y>0 && esTrazo[p-w]) vecino=1;
+      else if(y<h-1 && esTrazo[p+w]) vecino=1;
+      engrosado[p]=vecino;
+    }
+  }
+  return engrosado;
+}
+
 function capturarRecorteMarcador(){
   const region=estado.partido.marcadorOCR.region;
   const video=document.getElementById('vidLocal');
@@ -915,21 +934,7 @@ function capturarRecorteMarcador(){
     const gris=0.299*d[i]+0.587*d[i+1]+0.114*d[i+2];
     esTrazo[p] = gris>umbral? 1:0;
   }
-  // Engrosa 1px los trazos (dilatación): reconecta rayitas finas (como la
-  // diagonal del "1") que el umbral pueda haber dejado a medias o partidas.
-  const engrosado=new Uint8Array(w*h);
-  for(let y=0;y<h;y++){
-    for(let x=0;x<w;x++){
-      const p=y*w+x;
-      if(esTrazo[p]){ engrosado[p]=1; continue; }
-      let vecino=0;
-      if(x>0 && esTrazo[p-1]) vecino=1;
-      else if(x<w-1 && esTrazo[p+1]) vecino=1;
-      else if(y>0 && esTrazo[p-w]) vecino=1;
-      else if(y<h-1 && esTrazo[p+w]) vecino=1;
-      engrosado[p]=vecino;
-    }
-  }
+  const engrosado=engrosarVertical(esTrazo, w, h);
   for(let i=0, p=0;i<d.length;i+=4, p++){
     const v=engrosado[p]?255:0;
     d[i]=d[i+1]=d[i+2]=v;
