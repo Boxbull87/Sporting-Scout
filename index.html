@@ -584,7 +584,7 @@ const estado = {
     // bajo demanda ("Probar lectura"); todavía no se usa para calcular
     // minutos/eventos. ultimaLectura: {tVideo, totalSeg} de la última lectura
     // confirmada, para poder desambiguar lecturas dudosas por continuidad.
-    marcadorOCR:{activo:false, region:null, cuentaAtras:true, ultimaLectura:null}
+    marcadorOCR:{activo:false, region:null, cuentaAtras:true, ultimaLectura:null, plantillas:{}}
   },
   // Paneles de categorías: cada uno es un juego de botones/teclas independiente
   // (ej. "Ataque", "Defensa", "Solo estadísticas"), sincronizado a tu cuenta de
@@ -762,7 +762,7 @@ function extraerIdYT(u){
 // que existiera alguno de ellos. Un único sitio donde tocar si se añade algo.
 function asegurarMarcadorOCR(){
   if(!estado.partido.marcadorOCR){
-    estado.partido.marcadorOCR={activo:false, region:null, cuentaAtras:true, ultimaLectura:null};
+    estado.partido.marcadorOCR={activo:false, region:null, cuentaAtras:true, ultimaLectura:null, plantillas:{}};
     return;
   }
   const m=estado.partido.marcadorOCR;
@@ -770,6 +770,7 @@ function asegurarMarcadorOCR(){
   if(m.ultimaLectura===undefined) m.ultimaLectura=null;
   if(m.activo===undefined) m.activo=false;
   if(m.region===undefined) m.region=null;
+  if(m.plantillas===undefined) m.plantillas={};
 }
 
 // Tesseract.js es una librería grande (varios MB): se carga sola la primera
@@ -943,38 +944,63 @@ function capturarRecorteMarcador(){
   return cv;
 }
 
-// Analiza la imagen ya binarizada (blanco=trazo, negro=fondo) y encuentra el
-// hueco horizontal más ancho entre grupos de dígitos — es la pista visual que
-// distingue los dos formatos: en "mm:ss" el hueco ancho va tras el primer
-// número (1-2 dígitos), antes de los segundos (2 dígitos juntos); en "ss.d"
-// (últimos segundos) el hueco ancho va DESPUÉS de los segundos (2 dígitos
-// juntos), antes de la décima final (1 dígito, más suelta). Se usa cuando el
-// propio separador (":" o ".") no se ha reconocido, en vez de adivinar a
-// ciegas. Devuelve cuántos "bloques" de trazo hay a cada lado del hueco más
-// ancho, o null si no hay un hueco interno claro.
-function encontrarHuecoAncho(cv){
+// Analiza la imagen ya binarizada (blanco=trazo, negro=fondo) y devuelve cada
+// "bloque" de trazo separado por huecos (normalmente, un dígito o un signo de
+// puntuación por bloque), con su rango horizontal Y su extensión vertical
+// real (para poder distinguir luego un dígito completo de un punto suelto,
+// que ocupa mucha menos altura).
+function detectarBloques(cv){
   const ctx=cv.getContext('2d');
   const w=cv.width, h=cv.height;
   const datos=ctx.getImageData(0,0,w,h).data;
+  const esTrazo=(x,y)=>datos[(y*w+x)*4]>128;
   const tieneTrazo=new Array(w).fill(false);
   for(let x=0;x<w;x++){
-    for(let y=0;y<h;y++){
-      if(datos[(y*w+x)*4]>128){ tieneTrazo[x]=true; break; }
-    }
+    for(let y=0;y<h;y++){ if(esTrazo(x,y)){ tieneTrazo[x]=true; break; } }
   }
   let inicio=0; while(inicio<w && !tieneTrazo[inicio]) inicio++;
   let fin=w-1; while(fin>inicio && !tieneTrazo[fin]) fin--;
-  if(inicio>=fin) return null;
+  if(inicio>=fin) return [];
 
-  const bloques=[]; // tramos [x0,x1] con trazo, separados por huecos
+  const rangosX=[];
   let dentro=false, x0=0;
   for(let x=inicio;x<=fin;x++){
     if(tieneTrazo[x] && !dentro){ dentro=true; x0=x; }
-    else if(!tieneTrazo[x] && dentro){ dentro=false; bloques.push({x0,x1:x-1}); }
+    else if(!tieneTrazo[x] && dentro){ dentro=false; rangosX.push([x0,x-1]); }
   }
-  if(dentro) bloques.push({x0,x1:fin});
-  if(bloques.length<2) return null;
+  if(dentro) rangosX.push([x0,fin]);
 
+  return rangosX.map(([bx0,bx1])=>{
+    let y0=h, y1=-1;
+    for(let x=bx0;x<=bx1;x++){
+      for(let y=0;y<h;y++){
+        if(esTrazo(x,y)){ if(y<y0) y0=y; if(y>y1) y1=y; }
+      }
+    }
+    return {x0:bx0, x1:bx1, y0, y1, alto:y1-y0+1};
+  });
+}
+
+// El hueco horizontal más ancho entre bloques consecutivos — es la pista
+// visual que distingue "mm:ss" de "ss.d" cuando no se reconoce el separador
+// (ver candidatosMinutoMarcador): en "mm:ss" el hueco ancho va tras el primer
+// número (1-2 dígitos), antes de los segundos (2 dígitos juntos); en "ss.d"
+// va DESPUÉS de los segundos, antes de la décima final (1 dígito, más suelta).
+// De todos los bloques detectados, se queda solo con los que parecen dígitos
+// completos: suficiente altura (relativa al bloque más alto — descarta puntos
+// de separador/decimal) y un ancho y superficie mínimos (descarta motas de
+// ruido sueltas de un par de píxeles, que si no se cuelan como "dígitos").
+function filtrarBloquesDigito(bloques){
+  if(!bloques.length) return [];
+  const alturaMax=Math.max(...bloques.map(b=>b.alto));
+  return bloques.filter(b=>{
+    const ancho=b.x1-b.x0+1;
+    return b.alto>=alturaMax*0.6 && ancho>=2 && ancho*b.alto>=6;
+  });
+}
+
+function huecoMasAncho(bloques){
+  if(bloques.length<2) return null;
   let mejor=null;
   for(let i=0;i<bloques.length-1;i++){
     const ancho=bloques[i+1].x0-bloques[i].x1;
@@ -982,8 +1008,172 @@ function encontrarHuecoAncho(cv){
   }
   return {bloquesAntes:mejor.indice+1, bloquesDespues:bloques.length-(mejor.indice+1)};
 }
+function encontrarHuecoAncho(cv){ return huecoMasAncho(detectarBloques(cv)); }
 
 function formatearMMSS(c){ return String(c.min).padStart(2,'0')+':'+String(c.seg).padStart(2,'0'); }
+
+/* ---------- Plantillas de dígitos (reconocimiento a medida de tu marcador) ----------
+   El lector de texto general (Tesseract) es un modelo entrenado con texto
+   normal, y le cuesta distinguir dígitos iguales pegados (p.ej. "11", "111")
+   en la tipografía concreta de un marcador digital. En vez de pelear más con
+   eso, esto compara cada dígito recortado directamente contra ejemplos reales
+   de TU marcador, guardados una vez durante la calibración — mucho más
+   fiable para una fuente fija y conocida. Cada dígito se redimensiona a un
+   tamaño fijo y se compara pixel a pixel contra las plantillas guardadas. */
+const PLANTILLA_ANCHO=14, PLANTILLA_ALTO=20;
+const UMBRAL_CONFIANZA_PLANTILLA=0.88;
+
+// Recorta un bloque (según su propio contorno, no todo el alto del recorte)
+// y lo redimensiona a un tamaño fijo, como cadena de '0'/'1' por píxel — así
+// se puede comparar aunque el ancho/alto exacto varíe un poco de una lectura
+// a otra.
+function normalizarBloque(cvOrigen, b){
+  const cv=document.createElement('canvas');
+  cv.width=PLANTILLA_ANCHO; cv.height=PLANTILLA_ALTO;
+  const ctx=cv.getContext('2d');
+  ctx.imageSmoothingEnabled=true;
+  ctx.drawImage(cvOrigen, b.x0, b.y0, b.x1-b.x0+1, b.y1-b.y0+1, 0, 0, PLANTILLA_ANCHO, PLANTILLA_ALTO);
+  const datos=ctx.getImageData(0,0,PLANTILLA_ANCHO,PLANTILLA_ALTO).data;
+  let bits='';
+  for(let i=0;i<datos.length;i+=4) bits+= datos[i]>128? '1':'0';
+  return bits;
+}
+// Para enseñar en la calibración qué ha recortado, sin depender de guardar imágenes.
+function bitsAImagenDataURL(bits){
+  const cv=document.createElement('canvas');
+  cv.width=PLANTILLA_ANCHO; cv.height=PLANTILLA_ALTO;
+  const ctx=cv.getContext('2d');
+  const img=ctx.createImageData(PLANTILLA_ANCHO,PLANTILLA_ALTO);
+  for(let i=0;i<bits.length;i++){
+    const v=bits[i]==='1'?255:0;
+    img.data[i*4]=v; img.data[i*4+1]=v; img.data[i*4+2]=v; img.data[i*4+3]=255;
+  }
+  ctx.putImageData(img,0,0);
+  return cv.toDataURL();
+}
+function similitudPlantillas(a,b){
+  if(a.length!==b.length) return 0;
+  let iguales=0;
+  for(let i=0;i<a.length;i++) if(a[i]===b[i]) iguales++;
+  return iguales/a.length;
+}
+function clasificarDigito(bits){
+  const plantillas=estado.partido.marcadorOCR.plantillas||{};
+  let mejorDigito=null, mejorScore=0;
+  Object.keys(plantillas).forEach(d=>{
+    (plantillas[d]||[]).forEach(p=>{
+      const score=similitudPlantillas(bits,p);
+      if(score>mejorScore){ mejorScore=score; mejorDigito=d; }
+    });
+  });
+  return {digito:mejorDigito, score:mejorScore};
+}
+
+// Lectura completa usando solo plantillas propias, sin pasar por Tesseract.
+// null si no hay plantillas, si algún dígito no llega a la confianza mínima,
+// o si el número de dígitos/hueco no encaja con ninguno de los dos formatos
+// conocidos — mejor fallar limpio (y caer al lector general) que arriesgar.
+function leerConPlantillas(cv){
+  const plantillas=estado.partido.marcadorOCR.plantillas;
+  if(!plantillas || !Object.keys(plantillas).length) return null;
+  const bloques=detectarBloques(cv);
+  if(bloques.length<3) return null;
+  const digitos=filtrarBloquesDigito(bloques);
+  if(digitos.length<3 || digitos.length>4) return null;
+
+  let texto='', confianzaMin=1;
+  for(const b of digitos){
+    const bits=normalizarBloque(cv,b);
+    const {digito,score}=clasificarDigito(bits);
+    if(digito===null || score<UMBRAL_CONFIANZA_PLANTILLA) return null;
+    texto+=digito; confianzaMin=Math.min(confianzaMin,score);
+  }
+
+  const hueco=huecoMasAncho(digitos);
+  if(!hueco) return null;
+  let min,seg,decimas=false;
+  if(hueco.bloquesDespues===2){ min=texto.slice(0,hueco.bloquesAntes)||'0'; seg=texto.slice(-2); }
+  else if(hueco.bloquesAntes===2 && hueco.bloquesDespues===1){ min='0'; seg=texto.slice(0,2); decimas=true; }
+  else return null;
+  if(+seg>=60) return null;
+
+  const c={min:+min, seg:+seg, decimas, colonDirecto:true, porPlantillas:true, confianzaPlantilla:confianzaMin};
+  c.texto=formatearMMSS(c); c.totalSeg=c.min*60+c.seg;
+  return c;
+}
+
+// ---- Calibración: capturar y etiquetar dígitos reales de este vídeo ----
+let bloquesCalibrando=null, cvCalibrando=null;
+function abrirCalibrarDigitos(){
+  if(Reproductor.tipo!=='local'){ toast('La lectura de marcador solo funciona con vídeo local.'); return; }
+  if(!estado.partido.marcadorOCR.region){ toast('Primero calibra el recuadro del marcador.'); return; }
+  const cv=capturarRecorteMarcador();
+  if(!cv){ toast('No se pudo capturar el fotograma actual.'); return; }
+  const bloques=detectarBloques(cv);
+  if(!bloques.length){ toast('No se ve ningún trazo en el recuadro en este momento del vídeo.'); return; }
+  const digitos=filtrarBloquesDigito(bloques);
+  if(!digitos.length){ toast('No se detectan dígitos completos en este fotograma, prueba en otro momento.'); return; }
+  bloquesCalibrando=digitos; cvCalibrando=cv;
+  renderCalibrarDigitos();
+}
+function renderCalibrarDigitos(){
+  const plantillas=estado.partido.marcadorOCR.plantillas||{};
+  const filasDigitos=bloquesCalibrando.map((b,i)=>{
+    const bits=normalizarBloque(cvCalibrando,b);
+    const {digito,score}=clasificarDigito(bits);
+    const sugerido = digito!==null && score>0.7? digito : '';
+    return `<div style="display:flex;flex-direction:column;align-items:center;gap:4px">
+      <img src="${bitsAImagenDataURL(bits)}" style="width:42px;height:60px;border:1px solid var(--line);
+        image-rendering:pixelated;background:#000">
+      <input data-idx="${i}" class="calDigito" maxlength="1" value="${sugerido}"
+        style="width:34px;text-align:center" placeholder="?"></div>`;
+  }).join('');
+  const resumen=[0,1,2,3,4,5,6,7,8,9].map(d=>{
+    const n=(plantillas[d]||[]).length;
+    return `<span style="padding:2px 6px;border-radius:3px;font-size:11px;
+      background:${n? 'var(--ok)':'var(--panel-2)'};color:${n?'#08130E':'var(--muted)'}">${d}${n?' ×'+n:''}</span>`;
+  }).join(' ');
+
+  modal('Calibrar dígitos del marcador', `
+    <p style="color:var(--muted);font-size:11px;margin-bottom:10px">
+      Escribe qué número es cada recorte de abajo (déjalo en blanco para ignorarlo). Repite esto en varios
+      momentos del vídeo hasta cubrir los 10 dígitos — cuantos más ejemplos guardes por dígito, mejor reconoce.</p>
+    <div style="display:flex;gap:14px;flex-wrap:wrap;margin-bottom:16px;justify-content:center">${filasDigitos}</div>
+    <p style="color:var(--muted);font-size:10px;letter-spacing:.1em;text-transform:uppercase;margin-bottom:6px">
+      Ya tienes ejemplos de</p>
+    <div style="margin-bottom:16px">${resumen}</div>
+    <div class="fila-form">
+      <button class="btn btn-rojo" onclick="guardarCalibracionDigitos()">Guardar estos dígitos</button>
+      <button class="btn" onclick="abrirCalibrarDigitos()">Repetir en este mismo momento</button>
+      ${Object.keys(plantillas).length? '<button class="btn" onclick="borrarPlantillasDigitos()">Borrar todas las plantillas</button>' : ''}
+    </div>
+  `);
+}
+function guardarCalibracionDigitos(){
+  if(!estado.partido.marcadorOCR.plantillas) estado.partido.marcadorOCR.plantillas={};
+  const plantillas=estado.partido.marcadorOCR.plantillas;
+  let guardados=0;
+  document.querySelectorAll('.calDigito').forEach(inp=>{
+    const val=inp.value.trim();
+    if(!/^[0-9]$/.test(val)) return;
+    const bits=normalizarBloque(cvCalibrando, bloquesCalibrando[+inp.dataset.idx]);
+    if(!plantillas[val]) plantillas[val]=[];
+    plantillas[val].push(bits);
+    if(plantillas[val].length>6) plantillas[val].shift(); // como mucho 6 ejemplos por dígito
+    guardados++;
+  });
+  if(!guardados){ toast('No has escrito ningún dígito válido (0-9).'); return; }
+  guardar();
+  toast(guardados+' dígito(s) guardado(s) como plantilla.');
+  cerrarModal();
+}
+function borrarPlantillasDigitos(){
+  if(!confirm('¿Borrar todas las plantillas de dígitos calibradas? Se volverá a usar solo el lector de texto general.')) return;
+  estado.partido.marcadorOCR.plantillas={};
+  guardar();
+  toast('Plantillas borradas.');
+  cerrarModal();
+}
 
 // El marcador suele parpadear los dos puntos (encendido/apagado cada medio
 // segundo), así que en un fotograma cualquiera es normal que no se vean y el
@@ -1072,6 +1262,15 @@ async function leerMarcadorAhora(){
   const cv=capturarRecorteMarcador();
   if(!cv){ toast('No se pudo capturar el fotograma actual.'); return; }
   const tVideo=Reproductor.tiempo();
+
+  // Si hay plantillas de dígitos calibradas, se prueban primero — hechas a
+  // medida de tu marcador, mucho más fiables con dígitos repetidos ("11").
+  const porPlantillas=leerConPlantillas(cv);
+  if(porPlantillas){
+    mostrarResultadoOCR(cv, '(leído por plantillas propias)', Math.round(porPlantillas.confianzaPlantilla*100), porPlantillas, tVideo);
+    return;
+  }
+
   toast('Leyendo marcador…');
   try{
     await cargarTesseract();
@@ -1093,9 +1292,10 @@ async function leerMarcadorAhora(){
 function mostrarResultadoOCR(cv, texto, confianza, elegido, tVideo){
   const notas=[];
   if(elegido){
+    if(elegido.porPlantillas) notas.push('leído con tus plantillas de dígitos');
     if(elegido.porContinuidad) notas.push('ajustado comparando con la última lectura confirmada');
     if(elegido.porHueco) notas.push('agrupado por el hueco entre dígitos, sin separador visible');
-    else if(!elegido.colonDirecto) notas.push('separador no visto, deducido');
+    else if(!elegido.colonDirecto && !elegido.porPlantillas) notas.push('separador no visto, deducido');
     if(elegido.decimas) notas.push('formato segundos.décima, la décima se descarta');
   }
   const notaHtml = notas.length
@@ -1165,13 +1365,9 @@ async function probarMarcadorEnTodoElVideo(){
   abrirExportOverlay();
   document.getElementById('expBarra').max=total;
 
-  let worker=null;
+  let worker=null; // se crea solo si hace falta (si las plantillas no bastan para alguna lectura)
   const filas=[];
   try{
-    await cargarTesseract();
-    worker=await Tesseract.createWorker('eng');
-    await worker.setParameters({tessedit_char_whitelist:'0123456789:.', tessedit_pageseg_mode:'7'});
-
     let referencia=null;
     for(let i=0;i<total;i++){
       if(cancelarExport) break;
@@ -1184,12 +1380,22 @@ async function probarMarcadorEnTodoElVideo(){
       const cv=capturarRecorteMarcador();
       let texto='', elegido=null;
       if(cv){
-        try{
-          const {data}=await worker.recognize(cv);
-          texto=(data.text||'').trim();
-          elegido=elegirMejorCandidato(candidatosMinutoMarcador(texto, cv), t, referencia);
-          if(elegido) referencia={tVideo:t, totalSeg:elegido.totalSeg};
-        }catch(e){ /* esta lectura falla, seguimos con la siguiente */ }
+        elegido=leerConPlantillas(cv);
+        if(elegido){
+          texto='(plantillas: '+elegido.texto+')';
+        } else {
+          try{
+            if(!worker){
+              await cargarTesseract();
+              worker=await Tesseract.createWorker('eng');
+              await worker.setParameters({tessedit_char_whitelist:'0123456789:.', tessedit_pageseg_mode:'7'});
+            }
+            const {data}=await worker.recognize(cv);
+            texto=(data.text||'').trim();
+            elegido=elegirMejorCandidato(candidatosMinutoMarcador(texto, cv), t, referencia);
+          }catch(e){ /* esta lectura falla, seguimos con la siguiente */ }
+        }
+        if(elegido) referencia={tVideo:t, totalSeg:elegido.totalSeg};
       }
       filas.push({t, texto, elegido});
     }
@@ -1211,9 +1417,10 @@ function mostrarResultadosBatchMarcador(filas, intervalo, cancelado){
   const cuerpo=filas.map(f=>{
     const notas=[];
     if(f.elegido){
+      if(f.elegido.porPlantillas) notas.push('plantillas');
       if(f.elegido.porContinuidad) notas.push('desambiguado');
       if(f.elegido.porHueco) notas.push('por hueco');
-      else if(!f.elegido.colonDirecto) notas.push('deducido');
+      else if(!f.elegido.colonDirecto && !f.elegido.porPlantillas) notas.push('deducido');
       if(f.elegido.decimas) notas.push('seg.décima');
     }
     const sospechosa=f.elegido && f.elegido.desviacion!=null && f.elegido.desviacion>intervalo+1;
@@ -1257,11 +1464,16 @@ function bloqueMarcadorOCR(){
       El marcador cuenta hacia atrás (empieza en 20:00 y baja) — así es en la mayoría de fútbol sala
     </label>
     ${!esLocal? '<div class="aviso">Carga un vídeo local para poder calibrar y probar el marcador.</div>' : `
-    <div class="fila-form">
+    <div class="fila-form" style="margin-bottom:8px">
       <button class="btn" onclick="calibrarMarcador()">${m.region?'Recalibrar recuadro':'Calibrar recuadro'}</button>
       <button class="btn" onclick="leerMarcadorAhora()" ${!m.region?'disabled':''}>Probar lectura ahora</button>
       <button class="btn" onclick="probarMarcadorEnTodoElVideo()" ${!m.region?'disabled':''}>Probar en todo el vídeo</button>
       <span style="color:var(--muted);font-size:11px">${m.region?'Recuadro calibrado ✓':'Sin calibrar todavía'}</span>
+    </div>
+    <div class="fila-form">
+      <button class="btn" onclick="abrirCalibrarDigitos()" ${!m.region?'disabled':''}>Calibrar dígitos (plantillas propias)</button>
+      <span style="color:var(--muted);font-size:11px">${Object.keys(m.plantillas||{}).length?
+        Object.keys(m.plantillas).length+' de 10 dígitos con ejemplos guardados' : 'Sin plantillas todavía (usa el lector general)'}</span>
     </div>`}
   `;
 }
@@ -1843,7 +2055,7 @@ function nuevoProyecto(mantenerPropia){
     equipoPropio:estado.partido.equipoPropio||'CD Sporting FS Almería',
     equipoRival:'Rival', fecha:new Date().toISOString().slice(0,10),
     competicion:'', esRivalFuturo:false, fuenteVideo:null, refVideo:'', t0:{1:null,2:null}, tFin:{1:null,2:null},
-    marcadorOCR:{activo:false, region:null, cuentaAtras:true, ultimaLectura:null}
+    marcadorOCR:{activo:false, region:null, cuentaAtras:true, ultimaLectura:null, plantillas:{}}
   };
   estado.plantillaPropia=mantenerPropia? propiaActual : [];
   estado.plantillaRival=[];
