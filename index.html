@@ -969,9 +969,19 @@ function detectarBloques(cv){
   const w=cv.width, h=cv.height;
   const datos=ctx.getImageData(0,0,w,h).data;
   const esTrazo=(x,y)=>datos[(y*w+x)*4]>128;
+  // Una columna solo cuenta como "con trazo" si tiene una racha vertical
+  // seguida de varios píxeles — así una línea fina que cruce todo el ancho
+  // (el borde de la caja del marcador, un subrayado...) no une los dígitos
+  // entre sí como si fuera parte de ellos: esa línea es solo 1-2px de alto,
+  // un trazo de dígito de verdad es bastante más grueso.
+  const MIN_RACHA=3;
   const tieneTrazo=new Array(w).fill(false);
   for(let x=0;x<w;x++){
-    for(let y=0;y<h;y++){ if(esTrazo(x,y)){ tieneTrazo[x]=true; break; } }
+    let racha=0;
+    for(let y=0;y<h;y++){
+      if(esTrazo(x,y)){ racha++; if(racha>=MIN_RACHA){ tieneTrazo[x]=true; break; } }
+      else racha=0;
+    }
   }
   let inicio=0; while(inicio<w && !tieneTrazo[inicio]) inicio++;
   let fin=w-1; while(fin>inicio && !tieneTrazo[fin]) fin--;
