@@ -867,16 +867,32 @@ function capturarRecorteMarcador(){
 
 // El marcador suele parpadear los dos puntos (encendido/apagado cada medio
 // segundo), así que en un fotograma cualquiera es normal que no se vean y el
-// OCR devuelva algo como "1959" en vez de "19:59". Si no hay dos puntos pero
-// quedan 3-4 dígitos sueltos, se interpretan los 2 últimos como segundos y el
-// resto como minutos — es una suposición razonable, se marca como tal (ver
-// colonDirecto) para que "Probar lectura" deje claro cuándo se ha inferido.
+// OCR devuelva algo como "1959" en vez de "19:59". Además, en los últimos
+// segundos de la parte muchos marcadores cambian a mostrar solo segundos y
+// décima (ej. "42.5" = 42 segundos y 5 décimas), con un punto en vez de dos
+// puntos — ahí solo nos interesan los segundos, la décima se descarta.
+// La forma de distinguir "mm.ss" de "ss.d" es cuántos dígitos hay después del
+// separador: dos dígitos → son minutos y segundos; uno solo → son segundos y
+// décima. Si no hay separador visible, se interpretan los 2 últimos dígitos
+// sueltos como segundos y el resto como minutos (suposición razonable, se
+// marca como tal con colonDirecto para que "Probar lectura" lo deje claro).
 function parsearMinutoMarcador(texto){
-  const limpio=(texto||'').replace(/[^0-9:]/g,'');
-  const conColon=limpio.match(/(\d{1,2}):(\d{2})/);
-  if(conColon) return {min:+conColon[1], seg:+conColon[2],
-    texto:String(+conColon[1]).padStart(2,'0')+':'+conColon[2], colonDirecto:true};
-  const soloDigitos=limpio.replace(/:/g,'');
+  const limpio=(texto||'').replace(/[^0-9:.]/g,'');
+
+  // mm:ss o mm.ss (dos dígitos tras el separador)
+  const conMinutos=limpio.match(/(\d{1,2})[:.](\d{2})(?!\d)/);
+  if(conMinutos) return {min:+conMinutos[1], seg:+conMinutos[2],
+    texto:String(+conMinutos[1]).padStart(2,'0')+':'+conMinutos[2], colonDirecto:true};
+
+  // ss.d — solo segundos y décima (un único dígito tras el punto); nos
+  // quedamos con los segundos y tiramos la décima, tal como se pidió.
+  const soloSegundos=limpio.match(/(\d{1,2})\.(\d)(?!\d)/);
+  if(soloSegundos) return {min:0, seg:+soloSegundos[1],
+    texto:'00:'+String(+soloSegundos[1]).padStart(2,'0'), colonDirecto:true, decimas:true};
+
+  // sin separador visible (los dos puntos parpadeantes a veces no se ven):
+  // los 2 últimos dígitos son segundos y el resto minutos.
+  const soloDigitos=limpio.replace(/[:.]/g,'');
   if(soloDigitos.length>=3 && soloDigitos.length<=4){
     const seg=soloDigitos.slice(-2), min=soloDigitos.slice(0,-2)||'0';
     if(+seg<60) return {min:+min, seg:+seg, texto:min.padStart(2,'0')+':'+seg, colonDirecto:false};
@@ -893,7 +909,7 @@ async function leerMarcadorAhora(){
   try{
     await cargarTesseract();
     const worker = await Tesseract.createWorker('eng');
-    await worker.setParameters({tessedit_char_whitelist:'0123456789:'});
+    await worker.setParameters({tessedit_char_whitelist:'0123456789:.'});
     const {data} = await worker.recognize(cv);
     await worker.terminate();
     const texto=(data.text||'').trim();
@@ -904,9 +920,12 @@ async function leerMarcadorAhora(){
 }
 
 function mostrarResultadoOCR(cv, texto, confianza, parseado){
-  const minutoHtml = parseado
-    ? parseado.texto+(parseado.colonDirecto? '' :
-        ' <span style="color:var(--warn);font-size:10px;font-weight:400">(dos puntos no vistos, deducido)</span>')
+  const nota = parseado && !parseado.colonDirecto
+      ? ' <span style="color:var(--warn);font-size:10px;font-weight:400">(dos puntos no vistos, deducido)</span>'
+    : parseado && parseado.decimas
+      ? ' <span style="color:var(--muted);font-size:10px;font-weight:400">(formato segundos.décima, la décima se descarta)</span>'
+    : '';
+  const minutoHtml = parseado ? parseado.texto+nota
     : 'no reconocido';
   modal('Prueba de lectura del marcador', `
     <p style="color:var(--muted);font-size:11px;margin-bottom:10px">Esto es justo lo que ha visto el lector
