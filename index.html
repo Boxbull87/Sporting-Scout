@@ -1069,6 +1069,22 @@ function clasificarDigito(bits){
   return {digito:mejorDigito, score:mejorScore};
 }
 
+// Clasifica cada dígito detectado, uno a uno, sin decidir todavía si la
+// lectura completa vale o no. Se usa tanto para leer como para enseñar en
+// "Probar lectura ahora" un desglose de qué recorte ha reconocido bien y
+// cuál no — antes, si UN solo dígito fallaba (p.ej. por no tener plantilla
+// todavía), toda la lectura fallaba en bloque sin decir cuál era el problema.
+function diagnosticoPlantillas(cv){
+  const bloques=detectarBloques(cv);
+  const digitos=filtrarBloquesDigito(bloques);
+  const detalle=digitos.map(b=>{
+    const bits=normalizarBloque(cv,b);
+    const {digito,score}=clasificarDigito(bits);
+    return {bits, digito, score};
+  });
+  return {bloques, digitos, detalle};
+}
+
 // Lectura completa usando solo plantillas propias, sin pasar por Tesseract.
 // null si no hay plantillas, si algún dígito no llega a la confianza mínima,
 // o si el número de dígitos/hueco no encaja con ninguno de los dos formatos
@@ -1076,19 +1092,11 @@ function clasificarDigito(bits){
 function leerConPlantillas(cv){
   const plantillas=estado.partido.marcadorOCR.plantillas;
   if(!plantillas || !Object.keys(plantillas).length) return null;
-  const bloques=detectarBloques(cv);
-  if(bloques.length<3) return null;
-  const digitos=filtrarBloquesDigito(bloques);
+  const {digitos, detalle}=diagnosticoPlantillas(cv);
   if(digitos.length<3 || digitos.length>4) return null;
+  if(detalle.some(d=>d.digito===null || d.score<UMBRAL_CONFIANZA_PLANTILLA)) return null;
 
-  let texto='', confianzaMin=1;
-  for(const b of digitos){
-    const bits=normalizarBloque(cv,b);
-    const {digito,score}=clasificarDigito(bits);
-    if(digito===null || score<UMBRAL_CONFIANZA_PLANTILLA) return null;
-    texto+=digito; confianzaMin=Math.min(confianzaMin,score);
-  }
-
+  const texto=detalle.map(d=>d.digito).join('');
   const hueco=huecoMasAncho(digitos);
   if(!hueco) return null;
   let min,seg,decimas=false;
@@ -1097,7 +1105,8 @@ function leerConPlantillas(cv){
   else return null;
   if(+seg>=60) return null;
 
-  const c={min:+min, seg:+seg, decimas, colonDirecto:true, porPlantillas:true, confianzaPlantilla:confianzaMin};
+  const c={min:+min, seg:+seg, decimas, colonDirecto:true, porPlantillas:true,
+    confianzaPlantilla:Math.min(...detalle.map(d=>d.score))};
   c.texto=formatearMMSS(c); c.totalSeg=c.min*60+c.seg;
   return c;
 }
@@ -1263,11 +1272,13 @@ async function leerMarcadorAhora(){
   if(!cv){ toast('No se pudo capturar el fotograma actual.'); return; }
   const tVideo=Reproductor.tiempo();
 
-  // Si hay plantillas de dígitos calibradas, se prueban primero — hechas a
+  // Si hay plantillas de dígitos calibradas, se usan primero — hechas a
   // medida de tu marcador, mucho más fiables con dígitos repetidos ("11").
-  const porPlantillas=leerConPlantillas(cv);
-  if(porPlantillas){
-    mostrarResultadoOCR(cv, '(leído por plantillas propias)', Math.round(porPlantillas.confianzaPlantilla*100), porPlantillas, tVideo);
+  // Se enseña siempre el desglose dígito a dígito, tanto si sale bien como si
+  // no: antes, si UN solo dígito no tenía plantilla (o no llegaba a la
+  // confianza mínima), toda la lectura fallaba sin decir cuál era el culpable.
+  if(Object.keys(estado.partido.marcadorOCR.plantillas||{}).length){
+    mostrarDiagnosticoPlantillas(cv, tVideo);
     return;
   }
 
@@ -1336,6 +1347,54 @@ function confirmarLecturaMarcador(tVideo){
   estado.partido.marcadorOCR.ultimaLectura={tVideo, totalSeg:(+m[1])*60+(+m[2])};
   guardar();
   toast('Guardado como referencia · '+val+' en el vídeo '+tc(tVideo)+'.');
+  cerrarModal();
+}
+
+// Desglose dígito a dígito de la lectura por plantillas: verde = ese recorte
+// ha encontrado una plantilla que le encaja de sobra; rojo = no (o no tiene
+// ninguna plantilla de ese número todavía, o la que tiene no se parece lo
+// bastante). Así se ve exactamente cuál falta calibrar, en vez de un "no
+// reconocido" en bloque sin más pistas.
+function mostrarDiagnosticoPlantillas(cv, tVideo){
+  const {digitos, detalle}=diagnosticoPlantillas(cv);
+  const elegido=leerConPlantillas(cv);
+
+  const filas=digitos.map((b,i)=>{
+    const d=detalle[i];
+    const ok=d.digito!==null && d.score>=UMBRAL_CONFIANZA_PLANTILLA;
+    return `<div style="display:flex;flex-direction:column;align-items:center;gap:4px">
+      <img src="${bitsAImagenDataURL(d.bits)}" style="width:34px;height:48px;
+        border:2px solid ${ok?'var(--ok)':'var(--rojo)'};image-rendering:pixelated;background:#000">
+      <span style="font-size:11px;color:${ok?'var(--ok)':'var(--rojo)'}">${d.digito!==null?d.digito:'?'}${
+        d.score? ' · '+Math.round(d.score*100)+'%' : ''}</span>
+    </div>`;
+  }).join('');
+
+  modal('Diagnóstico de plantillas', `
+    <p style="color:var(--muted);font-size:11px;margin-bottom:10px">Cada recorte que se ha detectado en este
+      momento, con el número que más se le parece de tus plantillas y el % de parecido. En verde, los que llegan
+      al ${Math.round(UMBRAL_CONFIANZA_PLANTILLA*100)}% que hace falta; en rojo, los que no — a esos les falta
+      plantilla de ese número, o la plantilla que tienen no se parece lo bastante a este recorte en concreto.</p>
+    ${digitos.length? `<div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:14px;justify-content:center">
+      ${filas}</div>` : '<p style="color:var(--rojo);font-size:12px;margin-bottom:14px">No se detecta ningún trazo con pinta de dígito en este momento.</p>'}
+    ${elegido
+      ? `<div class="fila-form"><div class="campo"><label>Lectura completa</label>
+          <b style="font-size:16px;color:var(--ok)">${elegido.texto}</b></div>
+          <button class="btn btn-rojo" onclick="confirmarLecturaDesdePlantillas('${elegido.texto}',${tVideo})">Confirmar como referencia</button></div>`
+      : `<p style="color:var(--rojo);font-size:12px;margin-bottom:10px">No se pudo completar la lectura — añade
+          más ejemplos de los números en rojo con "Calibrar dígitos aquí mismo".</p>`}
+    <div class="fila-form" style="margin-top:14px">
+      <button class="btn" onclick="abrirCalibrarDigitos()">Calibrar dígitos aquí mismo</button>
+      <button class="btn" onclick="leerMarcadorAhora()">Probar de nuevo</button>
+    </div>
+  `);
+}
+function confirmarLecturaDesdePlantillas(texto,tVideo){
+  const m=texto.match(/^(\d{1,2}):(\d{2})$/);
+  if(!m) return;
+  estado.partido.marcadorOCR.ultimaLectura={tVideo, totalSeg:(+m[1])*60+(+m[2])};
+  guardar();
+  toast('Guardado como referencia · '+texto+' en el vídeo '+tc(tVideo)+'.');
   cerrarModal();
 }
 
