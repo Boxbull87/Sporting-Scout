@@ -2185,6 +2185,53 @@ function statsPorQuinteto(eventos){
   const filas = Array.from(mapa.values()).sort((a,b)=>b.total-a.total);
   return {catsCruza, filas};
 }
+
+/* ---------- Minutos jugados por jugador (1ª parte / 2ª parte / total) ----------
+   Reutiliza los mismos intervalos de intervalosQuinteto() (derivados del histórico
+   de entradas/salidas) y reparte la duración de cada tramo en pista entre las dos
+   partes usando los saques iniciales (t0) que ya fijas con "Fijar saque inicial". */
+// Último instante con datos reales, para poder cerrar el último tramo en pista
+// (tFin:Infinity) aunque no tengas el vídeo cargado en este momento.
+function finConocidoPartido(){
+  const dur = Reproductor.duracion();
+  if(dur) return dur;
+  let ultimo=0;
+  estado.eventos.forEach(e=>{ if(e.t_out>ultimo) ultimo=e.t_out; });
+  estado.cambiosQuinteto.forEach(c=>{ if(c.t>ultimo) ultimo=c.t; });
+  return ultimo;
+}
+// Reparte un tramo [tIni,tFin) de vídeo entre 1ª y 2ª parte según t0[1]/t0[2].
+// Si no se fijó el saque de la 2ª parte todavía, todo el tramo posterior al
+// saque de la 1ª cuenta como 1ª parte (es lo único que se puede saber).
+function repartirPorParte(tIni,tFin){
+  const inicio1 = estado.partido.t0[1]!=null? estado.partido.t0[1] : 0;
+  const inicio2 = estado.partido.t0[2];
+  const a=Math.max(tIni,inicio1), b=tFin;
+  if(b<=a) return {p1:0,p2:0};
+  if(inicio2==null || inicio2<=inicio1) return {p1:b-a, p2:0};
+  const p1=Math.max(0, Math.min(b,inicio2)-a);
+  const p2=Math.max(0, b-Math.max(a,inicio2));
+  return {p1,p2};
+}
+function tiempoJugadoPorJugador(){
+  if(!estado.cambiosQuinteto.length) return [];
+  const fin = finConocidoPartido();
+  const acumulado = new Map(); // id -> {p1,p2}
+  intervalosQuinteto().forEach(iv=>{
+    const tFinReal = iv.tFin===Infinity? fin : Math.min(iv.tFin, fin);
+    if(tFinReal<=iv.tIni) return;
+    const {p1,p2} = repartirPorParte(iv.tIni, tFinReal);
+    iv.jugadores.forEach(id=>{
+      if(!acumulado.has(id)) acumulado.set(id,{p1:0,p2:0});
+      const o=acumulado.get(id); o.p1+=p1; o.p2+=p2;
+    });
+  });
+  return estado.plantillaPropia.map(j=>{
+    const o=acumulado.get(j.id)||{p1:0,p2:0};
+    return {jugador:j, p1:o.p1, p2:o.p2, total:o.p1+o.p2};
+  }).sort((a,b)=>b.total-a.total);
+}
+
 function eventosPorParte(eventos,parte){
   return parte==='todo'? eventos : eventos.filter(e=>e.parte===Number(parte));
 }
@@ -2252,6 +2299,30 @@ function renderEstadisticas(parte){
 
   const cabecerasCat = catsStats.map(c=>`<th title="${c.nom}">${c.corto}</th>`).join('');
 
+  // Minutos jugados: siempre sobre el partido completo (no depende del selector
+  // de periodo de arriba, ya que aquí las columnas SON las dos partes).
+  const minutos = tiempoJugadoPorJugador();
+  const filasMinutos = minutos.map(m=>`<tr>
+    <td>#${m.jugador.dorsal}${m.jugador.nombre?' '+m.jugador.nombre:''}</td>
+    <td class="tc">${tc(m.p1)}</td>
+    <td class="tc">${tc(m.p2)}</td>
+    <td class="tc" style="color:var(--muted)">${tc(m.total)}</td>
+  </tr>`).join('');
+  let bloqueMinutos;
+  if(!estado.plantillaPropia.length){
+    bloqueMinutos = '<p style="color:var(--muted);font-size:11px">Todavía no tienes plantilla propia cargada.</p>';
+  } else if(!estado.cambiosQuinteto.length){
+    bloqueMinutos = '<p style="color:var(--muted);font-size:11px">Todavía no has marcado ningún quinteto en '+
+      'pista (panel lateral) en este proyecto.</p>';
+  } else {
+    bloqueMinutos = `<div style="overflow-x:auto"><table class="tabla">
+      <thead><tr><th>Jugador</th><th>1ª parte</th><th>2ª parte</th><th>Total</th></tr></thead>
+      <tbody>${filasMinutos}</tbody></table></div>
+      ${estado.partido.t0[2]==null? '<p style="color:var(--muted);font-size:10px;margin-top:6px">Todavía no has '+
+        'fijado el saque inicial de la 2ª parte ("Fijar saque inicial" en la barra superior): todo el tiempo '+
+        'jugado se cuenta como 1ª parte por ahora.</p>' : ''}`;
+  }
+
   const {catsCruza, filas: filasQuinteto} = statsPorQuinteto(propio);
   const cabecerasQuinteto = catsCruza.map(c=>`<th title="${c.nom}">${c.corto}</th>`).join('');
   const filasQuintetoHtml = filasQuinteto.map(f=>{
@@ -2302,6 +2373,10 @@ function renderEstadisticas(parte){
       <thead><tr><th>Jugador</th><th>Equipo</th>${cabecerasCat}<th>Total</th></tr></thead>
       <tbody>${filasJugadores}</tbody></table></div>`
     : '<p style="color:var(--muted);font-size:11px">No hay eventos en este periodo.</p>'}
+
+    <h3 style="font-size:10px;letter-spacing:.15em;text-transform:uppercase;color:var(--muted);margin:18px 0 9px">
+      Minutos jugados <span style="text-transform:none;letter-spacing:0;color:var(--muted)">(solo ${nomPropio} · todo el partido)</span></h3>
+    ${bloqueMinutos}
 
     <h3 style="font-size:10px;letter-spacing:.15em;text-transform:uppercase;color:var(--muted);margin:18px 0 9px">
       Por quinteto <span style="text-transform:none;letter-spacing:0;color:var(--muted)">(solo ${nomPropio})</span></h3>
