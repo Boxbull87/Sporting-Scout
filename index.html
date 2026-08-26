@@ -526,7 +526,7 @@ input:focus,select:focus,button:focus-visible{outline:2px solid var(--rojo);outl
 // (editable en directo desde el botón "Categorías").
 const CATEGORIAS_DEFECTO = [
   {id:'gol',      nom:'Gol',            corto:'Gol',    tecla:'1', color:'#D8232A', pre:8, post:4,
-   modo:'auto', activa:true, stats:true, resultados:[]},
+   modo:'auto', activa:true, stats:true, resultados:[], indGol:true},
   {id:'tiro',     nom:'Tiro',           corto:'Tiro',   tecla:'2', color:'#E8703A', pre:6, post:3,
    modo:'auto', activa:true, stats:true, resultados:['A puerta','Fuera','Bloqueado','Al palo']},
   {id:'parada',   nom:'Parada',         corto:'Parada', tecla:'3', color:'#3FB27F', pre:6, post:3,
@@ -2134,6 +2134,11 @@ function catsEnStats(){ return todasLasCategorias().filter(c=>c.stats!==false); 
 // quinteto" en el editor de categorías). Aparte para no meter de golpe todas las
 // categorías en la tabla por quinteto: la elige el coach una a una.
 function catsCruzanQuinteto(){ return todasLasCategorias().filter(c=>c.cruzaQuinteto); }
+// Categorías marcadas como "Gol" / "Ocasión" para el Rendimiento individual (checkboxes
+// del editor de categorías). Varias categorías pueden contar como Ocasión a la vez
+// (p.ej. "Tiro" y "1×1"), igual que con "Cruzar con quinteto".
+function catsGolIndividual(){ return todasLasCategorias().filter(c=>c.indGol); }
+function catsOcasionIndividual(){ return todasLasCategorias().filter(c=>c.indOcasion); }
 
 function statsPorCategoria(eventos){
   const out={};
@@ -2254,6 +2259,49 @@ function tiempoJugadoPorJugador(){
   }).sort((a,b)=>b.total-a.total);
 }
 
+/* ---------- Rendimiento individual (Gol/Ocasión a favor y en contra, normalizado
+   cada 10 minutos, por jugador) ----------
+   Para cada evento marcado con una categoría "Gol" u "Ocasión" (checkboxes del editor
+   de categorías), se busca qué jugadores propios estaban en pista en ese instante
+   (mismos intervalos que intervalosQuinteto()/Minutos jugados) y se les suma el evento
+   a TODOS ellos — a favor si el evento es del equipo propio, en contra si es del rival.
+   Así un gol encajado con el 5 en pista cuenta como "gol en contra" para esos 5, aunque
+   la acción en sí la haya marcado como del rival. Se normaliza dividiendo por los minutos
+   jugados de cada jugador EN EL MISMO periodo (todo/1ª/2ª) que se está mirando. */
+function statsIndividualPorJugador(parte){
+  const idsGol = new Set(catsGolIndividual().map(c=>c.id));
+  const idsOcasion = new Set(catsOcasionIndividual().map(c=>c.id));
+  if(!idsGol.size && !idsOcasion.size) return {filas:[], sinCategorias:true};
+  const intervalos = intervalosQuinteto();
+  const acumulado = new Map(); // jugadorId -> {golF,golC,ocF,ocC}
+  eventosPorParte(estado.eventos, parte).forEach(ev=>{
+    const esGol = idsGol.has(ev.tipo), esOcasion = idsOcasion.has(ev.tipo);
+    if(!esGol && !esOcasion) return;
+    if(ev.equipo!=='propio' && ev.equipo!=='rival') return;
+    const iv = intervalos.find(x=>ev.t_mark>=x.tIni && ev.t_mark<x.tFin);
+    if(!iv || !iv.jugadores.length) return; // sin quinteto marcado en ese instante: no se cuenta
+    const aFavor = ev.equipo==='propio';
+    iv.jugadores.forEach(id=>{
+      if(!acumulado.has(id)) acumulado.set(id,{golF:0,golC:0,ocF:0,ocC:0});
+      const o = acumulado.get(id);
+      if(esGol){ if(aFavor) o.golF++; else o.golC++; }
+      if(esOcasion){ if(aFavor) o.ocF++; else o.ocC++; }
+    });
+  });
+  const filas = tiempoJugadoPorJugador().map(m=>{
+    const minJugados = parte==='1'? m.p1 : parte==='2'? m.p2 : m.total; // segundos, ya reparadidos por 1ª/2ª parte
+    const o = acumulado.get(m.jugador.id) || {golF:0,golC:0,ocF:0,ocC:0};
+    const bloques10 = minJugados/600; // nº de bloques de 10 minutos jugados
+    const norm = v => bloques10>0? v/bloques10 : null;
+    return {
+      jugador: m.jugador, minJugados,
+      golF:o.golF, golC:o.golC, ocF:o.ocF, ocC:o.ocC,
+      golF10:norm(o.golF), golC10:norm(o.golC), ocF10:norm(o.ocF), ocC10:norm(o.ocC)
+    };
+  }).sort((a,b)=>b.minJugados-a.minJugados);
+  return {filas, sinCategorias:false};
+}
+
 function eventosPorParte(eventos,parte){
   return parte==='todo'? eventos : eventos.filter(e=>e.parte===Number(parte));
 }
@@ -2352,6 +2400,45 @@ function renderEstadisticas(parte){
       ${avisosMinutos.map(a=>'<p style="color:var(--muted);font-size:10px;margin-top:6px">'+a+'</p>').join('')}`;
   }
 
+  const {filas: filasRendInd, sinCategorias: sinCatsRendInd} = statsIndividualPorJugador(parte);
+  const fmtRate = v => v==null? '—' : v.toFixed(2);
+  const filasRendIndHtml = filasRendInd.map(f=>`<tr>
+    <td>#${f.jugador.dorsal}${f.jugador.nombre?' '+f.jugador.nombre:''}</td>
+    <td class="tc">${tc(f.minJugados)}</td>
+    <td class="tc">${f.golF}</td>
+    <td class="tc">${f.golC}</td>
+    <td class="tc">${f.ocF}</td>
+    <td class="tc">${f.ocC}</td>
+    <td class="tc" style="color:var(--muted)">${fmtRate(f.golF10)}</td>
+    <td class="tc" style="color:var(--muted)">${fmtRate(f.golC10)}</td>
+    <td class="tc" style="color:var(--muted)">${fmtRate(f.ocF10)}</td>
+    <td class="tc" style="color:var(--muted)">${fmtRate(f.ocC10)}</td>
+  </tr>`).join('');
+  let bloqueRendInd;
+  if(!estado.plantillaPropia.length){
+    bloqueRendInd = '<p style="color:var(--muted);font-size:11px">Todavía no tienes plantilla propia cargada.</p>';
+  } else if(!estado.cambiosQuinteto.length){
+    bloqueRendInd = '<p style="color:var(--muted);font-size:11px">Todavía no has marcado ningún quinteto en '+
+      'pista (panel lateral) en este proyecto.</p>';
+  } else if(sinCatsRendInd){
+    bloqueRendInd = '<p style="color:var(--muted);font-size:11px">Ninguna categoría está marcada como Gol u '+
+      'Ocasión. Actívalo con las casillas correspondientes al editar la categoría, en "Categorías".</p>';
+  } else {
+    bloqueRendInd = `<div style="overflow-x:auto"><table class="tabla">
+      <thead><tr><th>Jugador</th><th>Min.</th>
+        <th title="Goles a favor">GF</th><th title="Goles en contra">GC</th>
+        <th title="Ocasiones a favor">OF</th><th title="Ocasiones en contra">OC</th>
+        <th title="Goles a favor cada 10 minutos en pista">GF/10'</th>
+        <th title="Goles en contra cada 10 minutos en pista">GC/10'</th>
+        <th title="Ocasiones a favor cada 10 minutos en pista">OF/10'</th>
+        <th title="Ocasiones en contra cada 10 minutos en pista">OC/10'</th>
+      </tr></thead>
+      <tbody>${filasRendIndHtml}</tbody></table></div>
+      <p style="color:var(--muted);font-size:10px;margin-top:6px">Solo se cuentan los tramos en los que había un
+      quinteto propio marcado en pista. Los /10' se calculan sobre los minutos jugados en
+      ${parte==='todo'?'todo el partido':(parte+'ª parte')}.</p>`;
+  }
+
   const {catsCruza, filas: filasQuinteto} = statsPorQuinteto(propio);
   const cabecerasQuinteto = catsCruza.map(c=>`<th title="${c.nom}">${c.corto}</th>`).join('');
   const filasQuintetoHtml = filasQuinteto.map(f=>{
@@ -2406,6 +2493,10 @@ function renderEstadisticas(parte){
     <h3 style="font-size:10px;letter-spacing:.15em;text-transform:uppercase;color:var(--muted);margin:18px 0 9px">
       Minutos jugados <span style="text-transform:none;letter-spacing:0;color:var(--muted)">(solo ${nomPropio} · todo el partido)</span></h3>
     ${bloqueMinutos}
+
+    <h3 style="font-size:10px;letter-spacing:.15em;text-transform:uppercase;color:var(--muted);margin:18px 0 9px">
+      Rendimiento individual <span style="text-transform:none;letter-spacing:0;color:var(--muted)">(solo ${nomPropio} · qué genera y qué concede el equipo mientras cada jugador está en pista)</span></h3>
+    ${bloqueRendInd}
 
     <h3 style="font-size:10px;letter-spacing:.15em;text-transform:uppercase;color:var(--muted);margin:18px 0 9px">
       Por quinteto <span style="text-transform:none;letter-spacing:0;color:var(--muted)">(solo ${nomPropio})</span></h3>
@@ -2493,6 +2584,7 @@ function renderCategorias(){
     <td>${c.modo==='manual'?'Manual (activar/parar)':'Auto ('+(c.pre||0)+'s / '+(c.post||0)+'s)'}</td>
     <td>${c.stats===false?'No':'Sí'}</td>
     <td>${c.cruzaQuinteto?'Sí':'No'}</td>
+    <td>${[c.indGol?'Gol':null, c.indOcasion?'Ocasión':null].filter(Boolean).join(', ')||'—'}</td>
     <td>${c.activa===false?'Inactiva':'Activa'}</td>
     <td style="text-align:right;white-space:nowrap">
       <button class="btn" style="padding:2px 8px" onclick="editandoCategoria='${c.id}';renderCategorias()">Editar</button>
@@ -2518,7 +2610,7 @@ function renderCategorias(){
     <h3 style="font-family:var(--display);font-size:16px;text-transform:uppercase;letter-spacing:.05em;margin-bottom:10px">
       Categorías de "${panelActivo?panelActivo.nombre:''}"</h3>
     <div style="overflow-x:auto"><table class="tabla" style="margin-bottom:16px">
-      <thead><tr><th>Nombre</th><th>Tecla</th><th>Modo</th><th>En estadísticas</th><th>Quinteto</th><th>Estado</th><th></th></tr></thead>
+      <thead><tr><th>Nombre</th><th>Tecla</th><th>Modo</th><th>En estadísticas</th><th>Quinteto</th><th>Individual</th><th>Estado</th><th></th></tr></thead>
       <tbody>${filas}</tbody>
     </table></div>
     <h3 style="font-family:var(--display);font-size:16px;text-transform:uppercase;letter-spacing:.05em;margin-bottom:10px">
@@ -2551,6 +2643,12 @@ function renderCategorias(){
       <label style="display:flex;align-items:center;gap:6px;font-size:12px" title="Cuenta esta categoría en la tabla de Estadísticas → Por quinteto (solo equipo propio)">
         <input type="checkbox" id="cCruzaQuinteto" ${editando&&editando.cruzaQuinteto?'checked':''}> Cruzar con quinteto
       </label>
+      <label style="display:flex;align-items:center;gap:6px;font-size:12px" title="En Estadísticas → Rendimiento individual, cada evento de esta categoría cuenta como Gol (a favor si es del equipo propio, en contra si es del rival) para todos los jugadores que estaban en pista en ese momento">
+        <input type="checkbox" id="cIndGol" ${editando&&editando.indGol?'checked':''}> Cuenta como Gol (individual)
+      </label>
+      <label style="display:flex;align-items:center;gap:6px;font-size:12px" title="En Estadísticas → Rendimiento individual, cada evento de esta categoría cuenta como Ocasión (a favor si es del equipo propio, en contra si es del rival) para todos los jugadores que estaban en pista en ese momento">
+        <input type="checkbox" id="cIndOcasion" ${editando&&editando.indOcasion?'checked':''}> Cuenta como Ocasión (individual)
+      </label>
       <button class="btn btn-rojo" onclick="guardarCategoria()">${editando?'Guardar cambios':'Añadir categoría'}</button>
       ${editando?'<button class="btn" onclick="editandoCategoria=null;renderCategorias()">Cancelar</button>':''}
     </div>
@@ -2567,6 +2665,8 @@ function guardarCategoria(){
   const resultados = document.getElementById('cResultados').value.split(',').map(s=>s.trim()).filter(Boolean);
   const stats = document.getElementById('cStats').checked;
   const cruzaQuinteto = document.getElementById('cCruzaQuinteto').checked;
+  const indGol = document.getElementById('cIndGol').checked;
+  const indOcasion = document.getElementById('cIndOcasion').checked;
 
   if(!nom){ toast('Ponle un nombre a la categoría.'); return; }
   if(tecla.length!==1){ toast('La tecla debe ser un solo carácter.'); return; }
@@ -2579,10 +2679,10 @@ function guardarCategoria(){
 
   if(editandoCategoria){
     const c = estado.categorias.find(c=>c.id===editandoCategoria);
-    Object.assign(c,{nom,corto,tecla,color,modo,pre,post,resultados,stats,cruzaQuinteto});
+    Object.assign(c,{nom,corto,tecla,color,modo,pre,post,resultados,stats,cruzaQuinteto,indGol,indOcasion});
   } else {
     estado.categorias.push({id:idUnicoCategoria(nom), nom, corto, tecla, color, pre, post, modo,
-      resultados, stats, cruzaQuinteto, activa:true});
+      resultados, stats, cruzaQuinteto, indGol, indOcasion, activa:true});
   }
   editandoCategoria=null;
   guardarPanelActivo();
