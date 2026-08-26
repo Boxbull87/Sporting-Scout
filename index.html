@@ -2302,6 +2302,37 @@ function statsIndividualPorJugador(parte){
   return {filas, sinCategorias:false};
 }
 
+// Clasificación de mejor a peor en cada una de las 4 tasas por 10 minutos. Se excluye a
+// quien no ha pisado el campo en el periodo consultado (su tasa es null, no hay con qué
+// clasificarlo) — nunca se usan minutos fuera del campo, son las mismas tasas ya calculadas
+// por statsIndividualPorJugador() sobre solo los minutos jugados. "Mejor" para lo que el
+// equipo genera (a favor) es más; para lo que concede (en contra) es menos.
+function clasificacionRendimientoIndividual(filas){
+  const conMinutos = filas.filter(f=>f.minJugados>0);
+  const ordenar = (campo, sentido) => [...conMinutos]
+    .sort((a,b)=> sentido==='desc'? b[campo]-a[campo] : a[campo]-b[campo]);
+  return {
+    golF: ordenar('golF10','desc'),
+    golC: ordenar('golC10','asc'),
+    ocF:  ordenar('ocF10','desc'),
+    ocC:  ordenar('ocC10','asc')
+  };
+}
+// Una lista ordenada (mejor→peor) de la clasificación de arriba, en formato de tabla compacta.
+function tablaClasificacion_(titulo, lista, campo){
+  if(!lista.length){
+    return `<div><h4 style="font-size:10px;color:var(--muted);margin-bottom:6px">${titulo}</h4>
+      <p style="color:var(--muted);font-size:10px">Nadie con minutos en pista todavía.</p></div>`;
+  }
+  const filas = lista.map((f,i)=>`<tr>
+    <td class="tc" style="color:var(--muted);width:22px">${i+1}</td>
+    <td>#${f.jugador.dorsal}${f.jugador.nombre?' '+f.jugador.nombre:''}</td>
+    <td class="tc">${f[campo].toFixed(2)}</td>
+  </tr>`).join('');
+  return `<div><h4 style="font-size:10px;color:var(--muted);margin-bottom:6px">${titulo}</h4>
+    <table class="tabla"><tbody>${filas}</tbody></table></div>`;
+}
+
 function eventosPorParte(eventos,parte){
   return parte==='todo'? eventos : eventos.filter(e=>e.parte===Number(parte));
 }
@@ -2424,6 +2455,7 @@ function renderEstadisticas(parte){
     bloqueRendInd = '<p style="color:var(--muted);font-size:11px">Ninguna categoría está marcada como Gol u '+
       'Ocasión. Actívalo con las casillas correspondientes al editar la categoría, en "Categorías".</p>';
   } else {
+    const clasif = clasificacionRendimientoIndividual(filasRendInd);
     bloqueRendInd = `<div style="overflow-x:auto"><table class="tabla">
       <thead><tr><th>Jugador</th><th>Min.</th>
         <th title="Goles a favor">GF</th><th title="Goles en contra">GC</th>
@@ -2436,7 +2468,16 @@ function renderEstadisticas(parte){
       <tbody>${filasRendIndHtml}</tbody></table></div>
       <p style="color:var(--muted);font-size:10px;margin-top:6px">Solo se cuentan los tramos en los que había un
       quinteto propio marcado en pista. Los /10' se calculan sobre los minutos jugados en
-      ${parte==='todo'?'todo el partido':(parte+'ª parte')}.</p>`;
+      ${parte==='todo'?'todo el partido':(parte+'ª parte')}.</p>
+
+      <h4 style="font-size:10px;letter-spacing:.1em;text-transform:uppercase;color:var(--muted);margin:14px 0 8px">
+        Clasificación (de mejor a peor)</h4>
+      <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:12px">
+        ${tablaClasificacion_("Goles a favor / 10'", clasif.golF, 'golF10')}
+        ${tablaClasificacion_("Goles en contra / 10' (menos es mejor)", clasif.golC, 'golC10')}
+        ${tablaClasificacion_("Ocasiones a favor / 10'", clasif.ocF, 'ocF10')}
+        ${tablaClasificacion_("Ocasiones en contra / 10' (menos es mejor)", clasif.ocC, 'ocC10')}
+      </div>`;
   }
 
   const {catsCruza, filas: filasQuinteto} = statsPorQuinteto(propio);
