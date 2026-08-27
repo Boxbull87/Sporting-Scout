@@ -65,6 +65,17 @@ input:focus,select:focus,button:focus-visible{outline:2px solid var(--rojo);outl
 .caja-login input{width:100%}
 .caja-login .error{color:#F0A0A0;font-size:11px;min-height:14px}
 
+/* ---------- PANTALLA DE INICIO (elegir o crear proyecto al entrar) ---------- */
+#startScreen{
+  position:fixed;inset:0;background:var(--bg);display:flex;align-items:center;justify-content:center;
+  padding:24px;z-index:80;
+}
+#startScreen .caja{width:min(760px,100%);max-height:86vh;text-align:left}
+#startScreen h2{font-family:var(--display);font-size:26px;font-weight:700;letter-spacing:.06em;
+  text-transform:uppercase;text-align:center;padding:20px 16px 2px}
+#startScreen h2 span{color:var(--rojo)}
+#startScreen .inicio-sub{color:var(--muted);font-size:12px;text-align:center;padding:2px 16px 14px}
+
 /* ---------- BARRA SUPERIOR ---------- */
 .top{
   display:flex;align-items:center;gap:14px;padding:0 14px;height:52px;
@@ -356,6 +367,23 @@ input:focus,select:focus,button:focus-visible{outline:2px solid var(--rojo);outl
   <h2>Cuenta pendiente</h2>
   <p id="pendingTexto">Tu cuenta todavía no está activada.</p>
   <button class="btn" id="btnSalirPending">Cerrar sesión</button>
+</div>
+
+<div id="startScreen" class="hidden">
+  <div class="caja">
+    <h2>Scouting<span>·</span>FS</h2>
+    <p class="inicio-sub">Elige con qué proyecto quieres trabajar<span id="inicioCoach"></span>.</p>
+    <div class="caja-cuerpo">
+      <div class="fila-form" style="margin-bottom:14px">
+        <button class="btn btn-rojo" onclick="entrarNuevoProyecto()">+ Nuevo proyecto</button>
+        <span style="color:var(--muted);font-size:11px">Empieza en blanco (mantiene tu plantilla propia y tus categorías).</span>
+      </div>
+      <div id="inicioLista"><p style="color:var(--muted);font-size:11px">Cargando proyectos…</p></div>
+    </div>
+    <div style="padding:0 16px 16px;text-align:right">
+      <button class="btn" id="btnSalirInicio">Cerrar sesión</button>
+    </div>
+  </div>
 </div>
 
 <div id="appScreen" class="hidden">
@@ -1517,6 +1545,7 @@ function traducirErrorAuth(err){
 function mostrarPantalla(nombre){
   document.getElementById('authScreen').classList.toggle('hidden', nombre!=='auth');
   document.getElementById('pendingScreen').classList.toggle('hidden', nombre!=='pending');
+  document.getElementById('startScreen').classList.toggle('hidden', nombre!=='inicio');
   document.getElementById('appScreen').classList.toggle('hidden', nombre!=='app');
 }
 
@@ -1551,7 +1580,8 @@ sportingAuth.onAuthStateChanged(async (user)=>{
     await cargarEquiposSporting();
     const etq=document.getElementById('etiquetaCoach');
     if(etq) etq.textContent=coach.name;
-    mostrarPantalla('app');
+    const etqInicio=document.getElementById('inicioCoach');
+    if(etqInicio) etqInicio.textContent=', '+coach.name;
     arrancarApp();
   }catch(err){
     mostrarPantalla('auth');
@@ -1573,6 +1603,7 @@ document.getElementById('formLogin').onsubmit = async (e)=>{
   }
 };
 document.getElementById('btnSalirPending').onclick=()=>sportingAuth.signOut();
+document.getElementById('btnSalirInicio').onclick=()=>sportingAuth.signOut();
 
 async function cargarEquiposSporting(){
   const snap = await sportingDb.collection('teams').get();
@@ -1705,26 +1736,31 @@ function cerrarModal(){ document.getElementById('modal').classList.remove('abier
    (ver PERSISTENCIA LOCAL). Aquí solo vive la lista/crear/abrir/borrar.
    ===================================================================== */
 
+// Una fila de la tabla de proyectos, compartida entre el modal "Proyectos" (para
+// cambiar de proyecto sin salir de la app, botones -> abrirProyectoDesdeForm/
+// borrarProyectoDesdeForm) y la pantalla de inicio (para elegir uno al entrar,
+// botones -> entrarProyectoExistente/borrarProyectoDesdeInicio: modoInicio=true).
+function filaProyectoRow(p, activoId, modoInicio){
+  const activo = !modoInicio && p.id===activoId;
+  const rival = (p.partido && p.partido.equipoRival) || 'Rival';
+  const fecha = (p.partido && p.partido.fecha) || '—';
+  const futuro = p.partido && p.partido.esRivalFuturo;
+  const accionAbrir = activo
+    ? '<span style="color:var(--muted);font-size:11px">Abierto</span>'
+    : `<button class="btn" style="padding:2px 8px" onclick="${modoInicio?'entrarProyectoExistente':'abrirProyectoDesdeForm'}('${p.id}')">Abrir</button>`;
+  const accionBorrar = `<button class="btn" style="padding:2px 8px" onclick="${modoInicio?'borrarProyectoDesdeInicio':'borrarProyectoDesdeForm'}('${p.id}')" ${activo?'disabled':''}>Borrar</button>`;
+  return `<tr${activo?' style="background:var(--panel-2)"':''}>
+    <td>${rival}${futuro?' <span class="pill" style="background:#E0A32E22;color:#E0A32E">futuro</span>':''}</td>
+    <td class="tc">${fecha}</td>
+    <td class="tc">${(p.eventos||[]).length}</td>
+    <td class="tc" style="color:var(--muted)">${p.actualizado? new Date(p.actualizado).toLocaleString():'—'}</td>
+    <td style="text-align:right;white-space:nowrap">${accionAbrir} ${accionBorrar}</td></tr>`;
+}
+
 async function abrirProyectos(){
   const lista = await listarProyectos();
   lista.sort((a,b)=> new Date(b.actualizado||0) - new Date(a.actualizado||0));
-
-  const filas = lista.map(p=>{
-    const activo = p.id===estado.partido.id;
-    const rival = (p.partido && p.partido.equipoRival) || 'Rival';
-    const fecha = (p.partido && p.partido.fecha) || '—';
-    const futuro = p.partido && p.partido.esRivalFuturo;
-    return `<tr${activo?' style="background:var(--panel-2)"':''}>
-      <td>${rival}${futuro?' <span class="pill" style="background:#E0A32E22;color:#E0A32E">futuro</span>':''}</td>
-      <td class="tc">${fecha}</td>
-      <td class="tc">${(p.eventos||[]).length}</td>
-      <td class="tc" style="color:var(--muted)">${p.actualizado? new Date(p.actualizado).toLocaleString():'—'}</td>
-      <td style="text-align:right;white-space:nowrap">
-        ${activo? '<span style="color:var(--muted);font-size:11px">Abierto</span>'
-          : `<button class="btn" style="padding:2px 8px" onclick="abrirProyectoDesdeForm('${p.id}')">Abrir</button>`}
-        <button class="btn" style="padding:2px 8px" onclick="borrarProyectoDesdeForm('${p.id}')" ${activo?'disabled':''}>Borrar</button>
-      </td></tr>`;
-  }).join('');
+  const filas = lista.map(p=>filaProyectoRow(p, estado.partido.id, false)).join('');
 
   modal('Proyectos', `
     <div class="fila-form" style="margin-bottom:14px">
@@ -1736,6 +1772,52 @@ async function abrirProyectos(){
       <tbody>${filas}</tbody></table></div>`
     : '<p style="color:var(--muted);font-size:11px">Todavía no hay proyectos guardados.</p>'}
   `);
+}
+
+// Pantalla de inicio: misma lista que el modal "Proyectos" de arriba, pero a
+// pantalla completa y sin proyecto "activo" todavía (se elige aquí antes de entrar).
+async function renderPantallaInicio(){
+  const lista = await listarProyectos();
+  lista.sort((a,b)=> new Date(b.actualizado||0) - new Date(a.actualizado||0));
+  const filas = lista.map(p=>filaProyectoRow(p, null, true)).join('');
+  document.getElementById('inicioLista').innerHTML = lista.length
+    ? `<div style="overflow-x:auto"><table class="tabla">
+        <thead><tr><th>Rival</th><th>Fecha</th><th>Eventos</th><th>Última edición</th><th></th></tr></thead>
+        <tbody>${filas}</tbody></table></div>`
+    : '<p style="color:var(--muted);font-size:11px">Todavía no hay proyectos guardados. Crea el primero arriba.</p>';
+}
+
+// Arranca de cero en la pantalla de inicio (no crea el proyecto hasta que se pulsa
+// aquí; el objeto por defecto de estado.partido ya sirve de base "en blanco").
+function entrarNuevoProyecto(){
+  nuevoProyecto(true);
+  resetReproductor();
+  mostrarPantalla('app');
+  renderSelectorPanel();
+  renderPanelCategorias();
+  pintarTimeline();
+  renderQuinteto();
+  toast('Proyecto nuevo creado.');
+}
+async function entrarProyectoExistente(id){
+  const p = await cargarProyecto(id);
+  if(!p){ toast('No se pudo abrir ese proyecto.'); return; }
+  aplicarProyecto(id, p);
+  guardar();
+  resetReproductor();
+  mostrarPantalla('app');
+  renderSelectorPanel();
+  renderPanelCategorias();
+  pintarTimeline();
+  renderQuinteto();
+  intentarReconectarVideo();
+  toast('Proyecto abierto · '+estado.eventos.length+' eventos.');
+}
+async function borrarProyectoDesdeInicio(id){
+  if(!confirm('¿Borrar este proyecto? Esta acción no se puede deshacer.')) return;
+  await borrarProyectoDB(id);
+  toast('Proyecto borrado.');
+  renderPantallaInicio();
 }
 
 function nuevoProyectoDesdeForm(){
@@ -3562,7 +3644,7 @@ document.addEventListener('keydown',e=>{
 // justo después de que el login haya confirmado una cuenta activa de Sporting.
 let appIniciada=false;
 async function arrancarApp(){
-  if(appIniciada) return;
+  if(appIniciada){ mostrarPantalla('inicio'); await renderPantallaInicio(); return; }
   appIniciada=true;
   await abrirDB();
   await migrarProyectoLegado();
@@ -3593,20 +3675,11 @@ async function arrancarApp(){
     ? cfg.panelActivoId : estado.paneles[0].id;
   guardarConfigLocal();
 
-  if(cfg && cfg.ultimoProyectoId){
-    const p = await cargarProyecto(cfg.ultimoProyectoId);
-    if(p){
-      aplicarProyecto(cfg.ultimoProyectoId, p);
-      if(estado.eventos.length){
-        toast('Proyecto recuperado · '+estado.eventos.length+' eventos.');
-      }
-      intentarReconectarVideo();
-    }
-  }
-  renderSelectorPanel();
-  renderPanelCategorias();
-  pintarTimeline();
-  renderQuinteto();
+  // Ya no se recupera el último proyecto en silencio: se muestra la pantalla de
+  // inicio para elegir "Nuevo proyecto" o abrir uno de la lista, así siempre queda
+  // claro con qué proyecto se va a trabajar (ver entrarNuevoProyecto/entrarProyectoExistente).
+  mostrarPantalla('inicio');
+  await renderPantallaInicio();
 }
 </script>
 </body>
