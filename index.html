@@ -2327,6 +2327,13 @@ function etiquetaQuinteto(ids){
   }).sort((a,b)=> isNaN(a.n)||isNaN(b.n)? a.txt.localeCompare(b.txt) : a.n-b.n)
     .map(x=>x.txt).join(', ');
 }
+// El quinteto en pista SIEMPRE es el tuyo (estado.cambiosQuinteto solo sigue a
+// plantillaPropia), pero eso no significa que solo deban contar los eventos del
+// equipo propio: un tiro o gol del RIVAL mientras tu quinteto X estaba en pista es
+// justo el tipo de dato que se quiere ver aquí (qué se concede con cada quinteto).
+// Por eso cada categoría cruzada se cuenta por separado según ev.equipo — así una
+// categoría de equipo fijo (p.ej. "Tiro rival") sí aparece, y una que sigue el
+// interruptor no mezcla en un mismo número los eventos a favor y en contra.
 function statsPorQuinteto(eventos){
   const catsCruza = catsCruzanQuinteto();
   if(!catsCruza.length || !estado.cambiosQuinteto.length) return {catsCruza, filas:[]};
@@ -2334,17 +2341,31 @@ function statsPorQuinteto(eventos){
   const intervalos = intervalosQuinteto();
   const mapa = new Map();
   eventos.forEach(ev=>{
-    if(ev.equipo!=='propio' || !idsCruza.has(ev.tipo)) return;
+    if(!idsCruza.has(ev.tipo)) return;
+    if(ev.equipo!=='propio' && ev.equipo!=='rival') return;
     const iv = intervalos.find(x=>ev.t_mark>=x.tIni && ev.t_mark<x.tFin);
     if(!iv || !iv.jugadores.length) return; // sin quinteto marcado en ese instante: no se cuenta
     const key = [...iv.jugadores].sort().join(',');
     if(!mapa.has(key)) mapa.set(key, {jugadores:iv.jugadores, porCategoria:{}, total:0});
     const fila = mapa.get(key);
-    fila.porCategoria[ev.tipo] = (fila.porCategoria[ev.tipo]||0)+1;
+    const campo = ev.tipo+'_'+ev.equipo;
+    fila.porCategoria[campo] = (fila.porCategoria[campo]||0)+1;
     fila.total++;
   });
   const filas = Array.from(mapa.values()).sort((a,b)=>b.total-a.total);
   return {catsCruza, filas};
+}
+// Columnas a mostrar para "Por quinteto": una categoría con equipo fijo solo
+// necesita su única columna; una que sigue el interruptor necesita las dos
+// (Propio y Rival), para no mezclar en un número lo que se hace y lo que se concede.
+function columnasQuinteto(catsCruza){
+  const cols=[];
+  catsCruza.forEach(c=>{
+    if(c.equipoFijo==='propio') cols.push({cat:c, equipo:'propio'});
+    else if(c.equipoFijo==='rival') cols.push({cat:c, equipo:'rival'});
+    else { cols.push({cat:c, equipo:'propio'}); cols.push({cat:c, equipo:'rival'}); }
+  });
+  return cols;
 }
 
 /* ---------- Minutos jugados por jugador (1ª parte / 2ª parte / total) ----------
@@ -2628,10 +2649,15 @@ function renderEstadisticas(parte){
       </div>`;
   }
 
-  const {catsCruza, filas: filasQuinteto} = statsPorQuinteto(propio);
-  const cabecerasQuinteto = catsCruza.map(c=>`<th title="${c.nom}">${c.corto}</th>`).join('');
+  const {catsCruza, filas: filasQuinteto} = statsPorQuinteto(eventos);
+  const colsQuinteto = columnasQuinteto(catsCruza);
+  const cabecerasQuinteto = colsQuinteto.map(x=>{
+    const etiqueta = x.cat.equipoFijo? x.cat.corto : x.cat.corto+' '+(x.equipo==='propio'?'P':'R');
+    const titulo = x.cat.nom+' · '+(x.equipo==='propio'?'Propio':'Rival');
+    return `<th title="${titulo}">${etiqueta}</th>`;
+  }).join('');
   const filasQuintetoHtml = filasQuinteto.map(f=>{
-    const celdas = catsCruza.map(c=>`<td class="tc">${f.porCategoria[c.id]||'—'}</td>`).join('');
+    const celdas = colsQuinteto.map(x=>`<td class="tc">${f.porCategoria[x.cat.id+'_'+x.equipo]||'—'}</td>`).join('');
     return `<tr><td>${etiquetaQuinteto(f.jugadores)}</td>${celdas}
       <td class="tc" style="color:var(--muted)">${f.total}</td></tr>`;
   }).join('');
@@ -2643,12 +2669,15 @@ function renderEstadisticas(parte){
     bloqueQuinteto = '<p style="color:var(--muted);font-size:11px">Todavía no has marcado ningún quinteto en '+
       'pista (panel lateral) en este proyecto.</p>';
   } else if(!filasQuinteto.length){
-    bloqueQuinteto = '<p style="color:var(--muted);font-size:11px">No hay eventos propios de esas categorías '+
+    bloqueQuinteto = '<p style="color:var(--muted);font-size:11px">No hay eventos de esas categorías '+
       'mientras había un quinteto marcado en este periodo.</p>';
   } else {
     bloqueQuinteto = `<div style="overflow-x:auto"><table class="tabla">
       <thead><tr><th>Quinteto</th>${cabecerasQuinteto}<th>Total</th></tr></thead>
-      <tbody>${filasQuintetoHtml}</tbody></table></div>`;
+      <tbody>${filasQuintetoHtml}</tbody></table></div>
+      <p style="color:var(--muted);font-size:10px;margin-top:6px">"P" = eventos del equipo propio, "R" = del
+      rival, mientras ese quinteto (siempre tuyo) estaba en pista. Las categorías con equipo fijo solo llevan
+      su columna.</p>`;
   }
 
   const catsUbic = categoriasConUbicacion();
@@ -2710,7 +2739,7 @@ function renderEstadisticas(parte){
     ${bloqueRendInd}
 
     <h3 style="font-size:10px;letter-spacing:.15em;text-transform:uppercase;color:var(--muted);margin:18px 0 9px">
-      Por quinteto <span style="text-transform:none;letter-spacing:0;color:var(--muted)">(solo ${nomPropio})</span></h3>
+      Por quinteto <span style="text-transform:none;letter-spacing:0;color:var(--muted)">(quinteto de ${nomPropio} en pista, propio y rival)</span></h3>
     ${bloqueQuinteto}
 
     <h3 style="font-size:10px;letter-spacing:.15em;text-transform:uppercase;color:var(--muted);margin:18px 0 9px">
