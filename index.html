@@ -184,22 +184,24 @@ input:focus,select:focus,button:focus-visible{outline:2px solid var(--rojo);outl
 .marcaje{background:var(--panel);border-top:1px solid var(--line);flex:none;
   display:flex;flex-direction:column;min-height:90px;overflow:hidden}
 .marcaje-cab{padding:10px 12px 0;flex:none}
-.equipo-sw{display:grid;grid-template-columns:1fr 1fr;gap:6px}
+.sw-fila{display:flex;gap:8px}
+.equipo-sw{flex:1;display:grid;grid-template-columns:1fr 1fr;gap:6px}
 .equipo-sw button{
   padding:9px;border:1px solid var(--line);border-radius:var(--radius);background:var(--panel-2);
   font-family:var(--display);font-size:15px;font-weight:600;letter-spacing:.05em;text-transform:uppercase;
 }
 .equipo-sw button.on{background:var(--rojo);border-color:var(--rojo)}
 .equipo-sw button.on.rival{background:#2E6FB7;border-color:#2E6FB7}
+#modoSw button{font-size:12px}
 
-.doble-cat{flex:1;min-height:0;overflow-y:auto;display:grid;grid-template-columns:1fr 1fr}
-.panel-cat{padding:11px 12px;display:flex;flex-direction:column;min-width:0}
-.panel-cat+.panel-cat{border-left:1px solid var(--line)}
+/* Un solo panel de categorías a la vez (ver selector arriba para cambiar de panel);
+   antes había dos paneles lado a lado (Panel A / Panel B), ya retirado. */
+.panel-marcaje{flex:1;min-height:0;overflow-y:auto;padding:11px 12px;display:flex;flex-direction:column;min-width:0}
 .panel-cat-cab{display:flex;align-items:center;justify-content:space-between;gap:6px;margin-bottom:9px}
 .panel-cat-cab h3{font-size:10px;font-weight:600;letter-spacing:.15em;text-transform:uppercase;color:var(--muted)}
 .panel-cat-cab select{font-size:10px;padding:3px 5px;max-width:130px}
 
-.cats{display:grid;grid-template-columns:1fr 1fr;gap:6px}
+.cats{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:6px}
 .cat{
   position:relative;padding:11px 8px 9px;border:1px solid var(--line);border-radius:var(--radius);
   background:var(--panel-2);text-align:left;transition:transform .08s;
@@ -261,6 +263,8 @@ input:focus,select:focus,button:focus-visible{outline:2px solid var(--rojo);outl
 .tl-cab h3{font-family:var(--display);font-size:14px;font-weight:600;letter-spacing:.1em;
   text-transform:uppercase}
 .tl-cab .cuenta{color:var(--muted);font-size:11px}
+#btnPlegarTl{padding:2px 8px;font-size:11px;line-height:1}
+.tl.plegada .tl-scroll{display:none}
 .tl-scroll{overflow-x:auto;overflow-y:auto;position:relative}
 .tl-lienzo{position:relative;height:calc(var(--carriles) * 22px + 20px);min-width:100%}
 .regla{position:absolute;top:0;left:0;right:0;height:20px;border-bottom:1px solid var(--line)}
@@ -322,8 +326,7 @@ input:focus,select:focus,button:focus-visible{outline:2px solid var(--rojo);outl
   .cuerpo{grid-template-columns:1fr;grid-template-rows:1fr auto}
   .lat{border-left:none;border-top:1px solid var(--line);max-height:44vh}
   .resize-v{display:none}
-  .doble-cat{grid-template-columns:1fr}
-  .panel-cat+.panel-cat{border-left:none;border-top:1px solid var(--line)}
+  .sw-fila{flex-direction:column}
 }
 @media(prefers-reduced-motion:reduce){*{transition:none!important;animation:none!important}}
 </style>
@@ -423,8 +426,9 @@ input:focus,select:focus,button:focus-visible{outline:2px solid var(--rojo);outl
 
     <div class="resize-h" id="resizeTl" title="Arrastra para agrandar o achicar la línea de tiempo (doble clic para restaurar)"></div>
 
-    <div class="tl">
+    <div class="tl" id="tl">
       <div class="tl-cab">
+        <button class="btn" id="btnPlegarTl" title="Plegar/desplegar la línea de tiempo, para dar más sitio al vídeo y al panel">▾</button>
         <h3>Línea de tiempo</h3>
         <span class="cuenta" id="tlInfo">Sin eventos</span>
         <span style="flex:1"></span>
@@ -442,9 +446,15 @@ input:focus,select:focus,button:focus-visible{outline:2px solid var(--rojo);outl
 
     <div class="marcaje" id="marcaje">
       <div class="marcaje-cab">
-        <div class="equipo-sw" id="equipoSw">
-          <button id="eqPropio" class="on">Propio</button>
-          <button id="eqRival" class="rival">Rival</button>
+        <div class="sw-fila">
+          <div class="equipo-sw" id="equipoSw">
+            <button id="eqPropio" class="on">Propio</button>
+            <button id="eqRival" class="rival">Rival</button>
+          </div>
+          <div class="equipo-sw" id="modoSw" title="Con el ratón: qué se marca al pulsar una categoría. Con teclado: la tecla sola siempre marca Estadística, Shift+tecla siempre marca Corte.">
+            <button id="modoEstadistica" class="on">Estadística</button>
+            <button id="modoCorteRaton">Corte</button>
+          </div>
         </div>
         <div class="rapida" id="rapida">
           <h4 id="rapidaTitulo">Asignar</h4>
@@ -454,21 +464,12 @@ input:focus,select:focus,button:focus-visible{outline:2px solid var(--rojo);outl
           <div id="rapidaUbicacion" style="margin-top:4px"></div>
         </div>
       </div>
-      <div class="doble-cat">
-        <div class="panel-cat">
-          <div class="panel-cat-cab">
-            <h3>Panel A</h3>
-            <select id="selectorPanel" title="Cambiar panel izquierdo"></select>
-          </div>
-          <div class="cats" id="cats"></div>
+      <div class="panel-marcaje">
+        <div class="panel-cat-cab">
+          <h3>Panel</h3>
+          <select id="selectorPanel" title="Cambiar de panel"></select>
         </div>
-        <div class="panel-cat">
-          <div class="panel-cat-cab">
-            <h3>Panel B</h3>
-            <select id="selectorPanelB" title="Cambiar panel derecho"></select>
-          </div>
-          <div class="cats" id="catsB"></div>
-        </div>
+        <div class="cats" id="cats"></div>
       </div>
     </div>
   </div>
@@ -623,9 +624,6 @@ const estado = {
   paneles: [{id:'panel_defecto', nombre:'General', tipo:'completo',
     categorias: CATEGORIAS_DEFECTO.map(c=>({...c, resultados:[...c.resultados]}))}],
   panelActivoId: 'panel_defecto',
-  // Segundo panel visible a la vez, debajo de la línea de tiempo, junto al de
-  // arriba (p.ej. uno para estrategia y otro para clips). null = solo un panel.
-  panelActivoIdB: null,
   get categorias(){ return this.paneles.find(p=>p.id===this.panelActivoId).categorias; },
   set categorias(arr){ const p=this.paneles.find(p=>p.id===this.panelActivoId); if(p) p.categorias=arr; },
   enCurso:{},                  // categorías en modo manual con un evento abierto: {catId: evento}
@@ -779,7 +777,7 @@ function extraerIdYT(u){
    MARCAJE
    ===================================================================== */
 
-function nuevoEvento(cat,t_in,t_out,t_mark){
+function nuevoEvento(cat,t_in,t_out,t_mark,corte){
   return {
     id:'e_'+Date.now()+'_'+Math.random().toString(36).slice(2,7),
     partidoId: estado.partido.id,
@@ -794,6 +792,7 @@ function nuevoEvento(cat,t_in,t_out,t_mark){
     etiquetas: [],
     nota: '',
     punto: null,                  // {x,y} normalizados 0..1, solo si la categoría marca ubicación
+    corte: !!corte,               // true = este evento en concreto genera clip exportable (además de estadística)
     creado: new Date().toISOString()
   };
 }
@@ -841,10 +840,11 @@ function cerrarUbicacionCampo(punto){
   if(alTerminar) alTerminar();
 }
 
-function marcar(catId){
+// corte: true = además de estadística, este evento en concreto genera clip exportable
+// (tecla sola = false, Shift+tecla o botón "Corte" con el ratón = true). En modo manual
+// se decide en la primera pulsación (la que abre el evento); la segunda solo lo cierra.
+function marcar(catId, corte){
   if(!Reproductor.tipo){ toast('Carga primero un vídeo.'); return; }
-  // Se busca en TODOS los paneles (no solo en el activo/A): con el panel B visible
-  // a la vez, la categoría pulsada puede pertenecer a cualquiera de los dos.
   const cat = todasLasCategorias().find(c=>c.id===catId);
   if(!cat) return;
   const t = Reproductor.tiempo();
@@ -865,7 +865,7 @@ function marcar(catId){
       else abrirRapida(ev,cat);
     } else {
       // primera pulsación: abre el evento y empieza a crecer en la timeline
-      const ev = nuevoEvento(cat, Math.max(0,t-(cat.pre||0)), t, t);
+      const ev = nuevoEvento(cat, Math.max(0,t-(cat.pre||0)), t, t, corte);
       ev.abierto = true;
       estado.eventos.push(ev);
       estado.enCurso[catId]=ev;
@@ -877,7 +877,7 @@ function marcar(catId){
     return;
   }
 
-  const ev = nuevoEvento(cat, Math.max(0,t-cat.pre), t+cat.post, t);
+  const ev = nuevoEvento(cat, Math.max(0,t-cat.pre), t+cat.post, t, corte);
   estado.eventos.push(ev);
   estado.eventos.sort((a,b)=>a.t_mark-b.t_mark);
 
@@ -1223,7 +1223,7 @@ function guardarConfigLocal(){
   if(!db) return;
   try{
     db.transaction('config','readwrite').objectStore('config')
-      .put({paneles:estado.paneles, panelActivoId:estado.panelActivoId, panelActivoIdB:estado.panelActivoIdB,
+      .put({paneles:estado.paneles, panelActivoId:estado.panelActivoId,
         ultimoProyectoId:estado.partido.id}, 'global');
   }catch(e){}
 }
@@ -1890,14 +1890,14 @@ function abrirEventos(){
     return;
   }
   const esLocal = Reproductor.tipo==='local';
-  const hayEventosSinClip = estado.eventos.some(ev=>!categoriaGeneraClip(ev.tipo));
+  const hayEventosSinClip = estado.eventos.some(ev=>!eventoGeneraClip(ev));
   const eventosVisibles = filtroSoloClip
-    ? estado.eventos.filter(ev=>categoriaGeneraClip(ev.tipo))
+    ? estado.eventos.filter(ev=>eventoGeneraClip(ev))
     : estado.eventos;
   const filas = eventosVisibles.map(ev=>{
     const cat=todasLasCategorias().find(c=>c.id===ev.tipo) || {nom:ev.tipo,color:'#7E8CA0'};
-    const puedeClip = esLocal && categoriaGeneraClip(ev.tipo);
-    const tituloSinClip = categoriaGeneraClip(ev.tipo)? '' : 'title="Panel solo-estadísticas: sin clip"';
+    const puedeClip = esLocal && eventoGeneraClip(ev);
+    const tituloSinClip = eventoGeneraClip(ev)? '' : 'title="'+motivoSinClip(ev)+'"';
     return `<tr>
       <td><input type="checkbox" class="chk-export" data-id="${ev.id}" ${puedeClip?'checked':'disabled'}></td>
       <td class="tc">${tc(ev.t_mark)}</td>
@@ -1905,6 +1905,9 @@ function abrirEventos(){
       <td>${ev.equipo==='propio'?'Propio':'Rival'}</td>
       <td>${etiquetaJugador(ev)||'<span style="color:var(--muted)">sin asignar</span>'}</td>
       <td>${ev.resultado||'—'}</td>
+      <td class="tc">${categoriaGeneraClip(ev.tipo)
+        ? `<button class="btn" style="padding:2px 6px" onclick="toggleCorte('${ev.id}')" title="Cambiar entre Estadística y Corte">${ev.corte?'✂️ Corte':'Estad.'}</button>`
+        : `<span style="color:var(--muted);font-size:10px" title="Panel solo-estadísticas: nunca genera clip">—</span>`}</td>
       <td class="tc">${cat.ubicacion
         ? `<button class="btn" style="padding:2px 6px" onclick="abrirUbicacionCampo(estado.eventos.find(x=>x.id==='${ev.id}'), todasLasCategorias().find(x=>x.id==='${cat.id}'), abrirEventos)">${ev.punto?'📍':'➕📍'}</button>`
         : '—'}</td>
@@ -1968,9 +1971,15 @@ function abrirEventos(){
         pero necesita FFmpeg instalado y ejecutar el script manualmente.</p>
     </details>
     <div style="overflow-x:auto"><table class="tabla"><thead><tr><th></th><th>Min</th><th>Categoría</th><th>Equipo</th><th>Jugador</th>
-     <th>Resultado</th><th>Ubic.</th><th>Clip</th><th></th></tr></thead><tbody>${filas}</tbody></table></div>`);
+     <th>Resultado</th><th>Corte</th><th>Ubic.</th><th>Clip</th><th></th></tr></thead><tbody>${filas}</tbody></table></div>`);
 }
 function irA(t){ cerrarModal(); Reproductor.ir(t); Reproductor.play(); }
+function toggleCorte(id){
+  const ev=estado.eventos.find(e=>e.id===id);
+  if(!ev || !categoriaGeneraClip(ev.tipo)) return;
+  ev.corte=!ev.corte;
+  guardar(); pintarTimeline(); abrirEventos();
+}
 function borrarEvento(id){
   const i=estado.eventos.findIndex(e=>e.id===id);
   if(i>=0) estado.eventos.splice(i,1);
@@ -2010,7 +2019,7 @@ function exportarClipsFFmpeg(formato){
   if(!ids.length){ toast('No has marcado ningún evento para exportar.'); return; }
   const modoExacto = document.getElementById('modoCorte').value==='exacto';
 
-  const eventos = estado.eventos.filter(e=>ids.includes(e.id) && categoriaGeneraClip(e.tipo)).sort((a,b)=>a.t_in-b.t_in);
+  const eventos = estado.eventos.filter(e=>ids.includes(e.id) && eventoGeneraClip(e)).sort((a,b)=>a.t_in-b.t_in);
   const nombreVideo = estado.partido.refVideo || 'video.mp4';
   const nombreClips = 'clips_'+limpiarNombre(estado.partido.equipoRival||'partido');
   const refVar = formato==='bat' ? '%VIDEO%' : '$VIDEO';
@@ -2144,7 +2153,7 @@ async function descargarClipUnico(id){
   const ev=estado.eventos.find(e=>e.id===id);
   if(!ev) return;
   if(Reproductor.tipo!=='local'){ toast('Carga el vídeo local del partido.'); return; }
-  if(!categoriaGeneraClip(ev.tipo)){ toast('Esta categoría es de un panel "solo estadísticas": no genera clip.'); return; }
+  if(!eventoGeneraClip(ev)){ toast(motivoSinClip(ev)+'.'); return; }
   if(!soportaDescargaDirecta()){ toast('Tu navegador no soporta la descarga directa. Usa Chrome o Edge actualizados, o el script FFmpeg.'); return; }
   cancelarExport=false;
   cerrarModal();
@@ -2166,7 +2175,7 @@ async function descargarClipsDirecto(){
   if(!soportaDescargaDirecta()){ toast('Tu navegador no soporta la descarga directa. Usa Chrome o Edge actualizados, o el script FFmpeg.'); return; }
   const ids=Array.from(document.querySelectorAll('.chk-export:checked')).map(c=>c.dataset.id);
   if(!ids.length){ toast('No has marcado ningún evento para exportar.'); return; }
-  const eventos=estado.eventos.filter(e=>ids.includes(e.id) && categoriaGeneraClip(e.tipo)).sort((a,b)=>a.t_in-b.t_in);
+  const eventos=estado.eventos.filter(e=>ids.includes(e.id) && eventoGeneraClip(e)).sort((a,b)=>a.t_in-b.t_in);
 
   cancelarExport=false;
   cerrarModal();
@@ -2207,14 +2216,12 @@ function catsActivasDePanel(panelId){
   const panel = estado.paneles.find(p=>p.id===panelId);
   return panel? panel.categorias.filter(c=>c.activa!==false) : [];
 }
-// Categorías a mostrar como carriles en la timeline: las de los paneles activos
-// (A y, si lo hay, B — en su orden) más cualquier otra que ya tenga eventos
-// marcados (de cuando tenías activo otro panel), para no perder de vista eventos
-// antiguos ni llenar la timeline de carriles vacíos de paneles sin usar.
+// Categorías a mostrar como carriles en la timeline: las del panel activo más
+// cualquier otra que ya tenga eventos marcados (de cuando tenías activo otro panel),
+// para no perder de vista eventos antiguos ni llenar la timeline de carriles vacíos.
 function categoriasParaTimeline(){
-  const activasAB=[...catsActivasDePanel(estado.panelActivoId), ...catsActivasDePanel(estado.panelActivoIdB)];
-  const vistas=new Set(), base=[];
-  activasAB.forEach(c=>{ if(!vistas.has(c.id)){ vistas.add(c.id); base.push(c); } });
+  const base=catsActivasDePanel(estado.panelActivoId);
+  const vistas=new Set(base.map(c=>c.id));
   const idsConEventos=new Set(estado.eventos.map(e=>e.tipo));
   const otras=todasLasCategorias().filter(c=>!vistas.has(c.id) && idsConEventos.has(c.id));
   return [...base, ...otras];
@@ -2224,6 +2231,17 @@ function categoriasParaTimeline(){
 function categoriaGeneraClip(catId){
   const panel=estado.paneles.find(p=>p.categorias.some(c=>c.id===catId));
   return !!panel && panel.tipo!=='estadisticas';
+}
+// Si ESTE evento en concreto genera clip exportable: hace falta que su categoría lo
+// permita (panel no sea "solo estadísticas" — eso manda siempre, por encima de todo)
+// Y que el propio evento se marcara como "corte" (tecla+Shift o botón "Corte" del ratón).
+function eventoGeneraClip(ev){
+  return categoriaGeneraClip(ev.tipo) && ev.corte===true;
+}
+function motivoSinClip(ev){
+  if(!categoriaGeneraClip(ev.tipo)) return 'Panel solo-estadísticas: sin clip';
+  if(!ev.corte) return 'Marcado como estadística, no como corte';
+  return '';
 }
 
 /* =====================================================================
@@ -2944,7 +2962,7 @@ function renombrarPanelDesdeForm(id){
   guardarConfigLocal();
   guardarPanelEnFirestore(panel);
   renderCategorias();
-  if(panel.id===estado.panelActivoId || panel.id===estado.panelActivoIdB) renderSelectorPanel();
+  if(panel.id===estado.panelActivoId) renderSelectorPanel();
 }
 function cambiarTipoPanel(id, tipo){
   const panel = estado.paneles.find(p=>p.id===id);
@@ -2953,7 +2971,7 @@ function cambiarTipoPanel(id, tipo){
   guardarConfigLocal();
   guardarPanelEnFirestore(panel);
   renderCategorias();
-  if(id===estado.panelActivoId || id===estado.panelActivoIdB) renderSelectorPanel();
+  if(id===estado.panelActivoId) renderSelectorPanel();
 }
 function borrarPanelDesdeForm(id){
   if(estado.paneles.length<=1){ toast('No puedes borrar tu único panel.'); return; }
@@ -2963,7 +2981,6 @@ function borrarPanelDesdeForm(id){
     'Los eventos ya marcados con ellas NO se borran (siguen en tus proyectos), pero dejarás de poder '+
     'editarlas o volver a usarlas para marcar.')) return;
   estado.paneles = estado.paneles.filter(p=>p.id!==id);
-  if(estado.panelActivoIdB===id) estado.panelActivoIdB=null;
   if(estado.panelActivoId===id) cambiarPanel(estado.paneles[0].id);
   else { renderSelectorPanel(); renderPanelCategorias(); pintarTimeline(); guardarConfigLocal(); }
   borrarPanelEnFirestore(id);
@@ -2972,30 +2989,20 @@ function borrarPanelDesdeForm(id){
 }
 
 function abrirAyuda(){
-  const panelA = estado.paneles.find(p=>p.id===estado.panelActivoId);
-  const panelB = estado.paneles.find(p=>p.id===estado.panelActivoIdB);
-  const catsA = catsActivasDePanel(estado.panelActivoId);
-  const catsB = catsActivasDePanel(estado.panelActivoIdB);
-  const filaCat=(c,tecla)=>`<div class="atajo">${tecla} ${c.nom}${c.modo==='manual'?' (activar/parar)':''}</div>`;
-  const listaA = catsA.map(c=>filaCat(c, `<kbd>${c.tecla}</kbd>`)).join('');
-  const listaB = catsB.map(c=>{
-    const colisiona = catsA.some(a=>a.tecla===c.tecla);
-    return filaCat(c, colisiona? `<kbd>Shift</kbd>+<kbd>${c.tecla}</kbd>` : `<kbd>${c.tecla}</kbd>`);
-  }).join('');
+  const panel = estado.paneles.find(p=>p.id===estado.panelActivoId);
+  const cats = catsActivasDePanel(estado.panelActivoId);
+  const filaCat=(c)=>`<div class="atajo"><kbd>${c.tecla}</kbd> ${c.nom}${c.modo==='manual'?' (activar/parar)':''}</div>`;
+  const lista = cats.map(filaCat).join('');
 
   modal('Atajos de teclado', `
-    <p style="color:var(--muted);font-size:11px;margin-bottom:12px">Panel A: <b>${panelA?panelA.nombre:''}</b>
-      ${panelB? ' · Panel B: <b>'+panelB.nombre+'</b>' : ' (sin panel B activo)'} —
-      cámbialos desde los desplegables debajo de la línea de tiempo.</p>
+    <p style="color:var(--muted);font-size:11px;margin-bottom:12px">Panel activo: <b>${panel?panel.nombre:''}</b> —
+      cámbialo desde el desplegable debajo de la línea de tiempo.</p>
     <h3 style="font-size:10px;letter-spacing:.15em;text-transform:uppercase;color:var(--muted);margin-bottom:9px">
-      Marcaje · Panel A</h3>
-    <div class="atajos">${listaA}</div>
-    ${panelB? `
-    <h3 style="font-size:10px;letter-spacing:.15em;text-transform:uppercase;color:var(--muted);margin:14px 0 3px">
-      Marcaje · Panel B</h3>
-    <p style="color:var(--muted);font-size:10px;margin-bottom:9px">Si una tecla coincide con el panel A, la del
-      panel B pasa a ser Shift+tecla.</p>
-    <div class="atajos">${listaB}</div>` : ''}
+      Marcaje</h3>
+    <div class="atajos">${lista}</div>
+    <p style="color:var(--muted);font-size:10px;margin:9px 0 0">La tecla sola marca solo estadística (sin clip);
+      <kbd>Shift</kbd>+tecla marca además un corte de vídeo exportable. El interruptor "Estadística / Corte" encima
+      del panel hace lo mismo con el ratón.</p>
     <h3 style="font-size:10px;letter-spacing:.15em;text-transform:uppercase;color:var(--muted);margin:18px 0 9px">
       Reproducción</h3>
     <div class="atajos">
@@ -3025,11 +3032,10 @@ function botonPlay(){
 }
 
 // panel de categorías: se repinta al arrancar y cada vez que se editan
-// categorías desde el modal "Categorías" (añadir/editar/activar/desactivar).
-// Dibuja los dos paneles a la vez (A y B, debajo de la línea de tiempo).
+// categorías desde el modal "Categorías" (añadir/editar/activar/desactivar), o al
+// cambiar de panel activo con el selector.
 function renderPanelCategorias(){
   pintarGridCategorias('cats', estado.panelActivoId);
-  pintarGridCategorias('catsB', estado.panelActivoIdB);
   ajustarDensidadCategorias();
 }
 function pintarGridCategorias(contId, panelId){
@@ -3042,7 +3048,7 @@ function pintarGridCategorias(contId, panelId){
     b.innerHTML=`<span class="franja" style="background:${c.color}"></span>
       <span class="tecla">${c.tecla}</span><b>${c.nom}</b>
       <i>${c.modo==='manual'? 'activar / parar' : '−'+c.pre+'s / +'+c.post+'s'}</i>`;
-    b.onclick=()=>marcar(c.id);
+    b.onclick=()=>marcar(c.id, modoRatonCorte);
     cont.appendChild(b);
   });
 }
@@ -3054,48 +3060,34 @@ function pintarGridCategorias(contId, panelId){
 // luego agrandas el panel otra vez).
 function ajustarDensidadCategorias(){
   const marcaje=document.getElementById('marcaje');
-  const doble=document.querySelector('.doble-cat');
-  if(!marcaje || !doble) return;
+  const panel=document.querySelector('.panel-marcaje');
+  if(!marcaje || !panel) return;
   marcaje.classList.remove('cats-compacto','cats-mini');
-  if(doble.scrollHeight > doble.clientHeight+1){
+  if(panel.scrollHeight > panel.clientHeight+1){
     marcaje.classList.add('cats-compacto');
-    if(doble.scrollHeight > doble.clientHeight+1){
+    if(panel.scrollHeight > panel.clientHeight+1){
       marcaje.classList.add('cats-mini');
     }
   }
 }
 
 // Selectores compactos para cambiar de panel sin salir del marcaje (encima de cada
-// una de las dos columnas, debajo de la línea de tiempo). El modal "Categorías"
-// tiene su propia gestión completa de paneles; esto es solo para intercambiar
-// rápido mientras ves vídeo. El B admite "— Ninguno —" para dejar un solo panel.
+// Selector compacto para cambiar de panel sin salir del marcaje (debajo de la línea
+// de tiempo). El modal "Categorías" tiene su propia gestión completa de paneles; esto
+// es solo para intercambiar rápido mientras ves vídeo. Solo se muestra un panel a la
+// vez (antes hubo una vista con dos paneles lado a lado, Panel A/B, ya retirada).
 function renderSelectorPanel(){
-  const selA=document.getElementById('selectorPanel');
-  const selB=document.getElementById('selectorPanelB');
-  if(!selA) return;
-  const opciones = estado.paneles.map(p=>
+  const sel=document.getElementById('selectorPanel');
+  if(!sel) return;
+  sel.innerHTML = estado.paneles.map(p=>
     `<option value="${p.id}">${p.nombre}${p.tipo==='estadisticas'?' (sin clip)':''}</option>`
   ).join('');
-  selA.innerHTML = opciones;
-  selA.value = estado.panelActivoId;
-  if(selB){
-    selB.innerHTML = '<option value="">— Ninguno —</option>' + opciones;
-    selB.value = estado.panelActivoIdB || '';
-  }
+  sel.value = estado.panelActivoId;
 }
 function cambiarPanel(id){
   const panel = estado.paneles.find(p=>p.id===id);
   if(!panel) return;
   estado.panelActivoId = id; // estado.categorias (getter) pasa a apuntar a panel.categorias solo
-  renderSelectorPanel();
-  renderPanelCategorias();
-  pintarTimeline();
-  guardarConfigLocal();
-}
-// Panel B: igual que cambiarPanel pero para el segundo panel visible a la vez.
-// id vacío/null = quitar el panel B y dejar solo el A.
-function cambiarPanelB(id){
-  estado.panelActivoIdB = id || null;
   renderSelectorPanel();
   renderPanelCategorias();
   pintarTimeline();
@@ -3154,6 +3146,14 @@ document.getElementById('btnFrameA').onclick=()=>Reproductor.frame(-1);
 document.getElementById('btnFrameD').onclick=()=>Reproductor.frame(1);
 document.getElementById('velocidad').onchange=e=>Reproductor.velocidad(parseFloat(e.target.value));
 document.getElementById('zoom').onchange=e=>{ estado.pxs=parseInt(e.target.value); pintarTimeline(); };
+
+// Plegar/desplegar la línea de tiempo: da más sitio al vídeo y al panel de marcaje
+// cuando no la necesitas encima. No se persiste entre sesiones (como el zoom).
+document.getElementById('btnPlegarTl').onclick=()=>{
+  const tl=document.getElementById('tl');
+  const plegada=tl.classList.toggle('plegada');
+  document.getElementById('btnPlegarTl').textContent = plegada? '▸' : '▾';
+};
 
 // barra de tiempo tradicional (buscar por todo el vídeo, como en YouTube). Mientras
 // se arrastra no se deja que el intervalo de 10fps le pise el valor (ver arrastrandoScrub).
@@ -3282,6 +3282,17 @@ function guardarLayout(cambios){
 // equipo activo
 document.getElementById('eqPropio').onclick=()=>cambiarEquipo('propio');
 document.getElementById('eqRival').onclick=()=>cambiarEquipo('rival');
+
+// Modo de marcaje con el ratón: solo afecta al clic sobre una categoría (el teclado
+// sigue igual: tecla=estadística, Shift+tecla=corte, sin depender de este interruptor).
+let modoRatonCorte=false;
+function cambiarModoRaton(corte){
+  modoRatonCorte=corte;
+  document.getElementById('modoEstadistica').classList.toggle('on',!corte);
+  document.getElementById('modoCorteRaton').classList.toggle('on',corte);
+}
+document.getElementById('modoEstadistica').onclick=()=>cambiarModoRaton(false);
+document.getElementById('modoCorteRaton').onclick=()=>cambiarModoRaton(true);
 function cambiarEquipo(q){
   estado.equipoActivo=q;
   document.getElementById('eqPropio').classList.toggle('on',q==='propio');
@@ -3313,7 +3324,6 @@ document.getElementById('btnPartido').onclick=abrirPartido;
 document.getElementById('btnPlantillas').onclick=abrirPlantillas;
 document.getElementById('btnCategorias').onclick=abrirCategorias;
 document.getElementById('selectorPanel').onchange=e=>cambiarPanel(e.target.value);
-document.getElementById('selectorPanelB').onchange=e=>cambiarPanelB(e.target.value);
 document.getElementById('btnEventos').onclick=abrirEventos;
 document.getElementById('btnStats').onclick=abrirEstadisticas;
 document.getElementById('btnAyuda').onclick=abrirAyuda;
@@ -3360,8 +3370,8 @@ document.getElementById('tlScroll').onclick=e=>{
 };
 
 // Tecla física de base, ignorando Shift (p.ej. Shift+1 da e.key='!' en muchos
-// teclados, pero e.code sigue siendo 'Digit1'). Se usa solo para resolver colisiones
-// de tecla rápida entre el panel A y el B — ver keydown más abajo.
+// teclados, pero e.code sigue siendo 'Digit1'). Se usa para reconocer la categoría al
+// pulsar Shift+tecla (corte de vídeo) — ver keydown más abajo.
 function teclaBase(e){
   const d=/^Digit(\d)$/.exec(e.code); if(d) return d[1];
   const l=/^Key([A-Z])$/.exec(e.code); if(l) return l[1].toLowerCase();
@@ -3379,23 +3389,15 @@ document.addEventListener('keydown',e=>{
   if(e.key==='Escape'){ cerrarModal(); return; }
   if(document.getElementById('modal').classList.contains('abierto')) return;
 
-  // Paneles A y B pueden tener teclas repetidas (p.ej. las dos usan "1"). Primero
-  // se intenta la coincidencia normal (tal cual se pulsó, como toda la vida) tanto
-  // en A como en B; si las DOS coinciden a la vez es que hay colisión real, y ahí
-  // decide Shift (sin Shift = A, con Shift = B). Si no hay coincidencia directa pero
-  // se pulsó Shift, se prueba también con la tecla física de base (ver teclaBase) por
-  // si la colisión es en dígitos/letras cuyo carácter cambia al mantener Shift.
-  const catsA=catsActivasDePanel(estado.panelActivoId), catsB=catsActivasDePanel(estado.panelActivoIdB);
-  const enADirecta=catsA.find(c=>c.tecla===e.key), enBDirecta=catsB.find(c=>c.tecla===e.key);
-  let cat=null;
-  if(enADirecta && enBDirecta) cat = e.shiftKey? enBDirecta : enADirecta;
-  else if(enADirecta || enBDirecta) cat = enADirecta || enBDirecta;
-  else if(e.shiftKey){
-    const base=teclaBase(e);
-    const enABase=catsA.find(c=>c.tecla===base), enBBase=catsB.find(c=>c.tecla===base);
-    if(enABase && enBBase) cat = enBBase;
-  }
-  if(cat){ e.preventDefault(); marcar(cat.id); return; }
+  // Busca la categoría del panel activo con esa tecla. Si no hay coincidencia directa
+  // pero se pulsó Shift, se prueba también con la tecla física de base (ver teclaBase)
+  // por si Shift cambió el carácter (p.ej. Shift+1 da e.key='!' en muchos teclados).
+  // Shift no cambia CUÁL categoría se marca, solo si además genera corte de vídeo
+  // (ver marcar()): tecla sola = estadística, Shift+tecla = corte.
+  const cats=catsActivasDePanel(estado.panelActivoId);
+  let cat=cats.find(c=>c.tecla===e.key);
+  if(!cat && e.shiftKey) cat=cats.find(c=>c.tecla===teclaBase(e));
+  if(cat){ e.preventDefault(); marcar(cat.id, e.shiftKey); return; }
 
   switch(e.key){
     case ' ': e.preventDefault(); Reproductor.alternar(); setTimeout(botonPlay,60); break;
@@ -3440,8 +3442,6 @@ async function arrancarApp(){
   }
   estado.panelActivoId = (cfg && cfg.panelActivoId && estado.paneles.some(p=>p.id===cfg.panelActivoId))
     ? cfg.panelActivoId : estado.paneles[0].id;
-  estado.panelActivoIdB = (cfg && cfg.panelActivoIdB && estado.paneles.some(p=>p.id===cfg.panelActivoIdB))
-    ? cfg.panelActivoIdB : null;
   guardarConfigLocal();
 
   if(cfg && cfg.ultimoProyectoId){
