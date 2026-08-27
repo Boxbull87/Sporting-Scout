@@ -273,6 +273,8 @@ input:focus,select:focus,button:focus-visible{outline:2px solid var(--rojo);outl
   display:inline-flex;align-items:baseline;gap:5px;
 }
 .dorsal:hover{background:var(--rojo);border-color:var(--rojo)}
+.dorsal.on{background:var(--ok);border-color:var(--ok)}
+.dorsal.on .dorsal-nom{color:#08130E}
 .dorsal .dorsal-n{font-family:var(--display);font-size:15px;font-weight:600;font-variant-numeric:tabular-nums}
 .dorsal .dorsal-nom{font-size:11px;color:var(--muted)}
 .dorsal:hover .dorsal-nom{color:#F0D0D0}
@@ -499,7 +501,10 @@ input:focus,select:focus,button:focus-visible{outline:2px solid var(--rojo);outl
           </div>
         </div>
         <div class="rapida" id="rapida">
-          <h4 id="rapidaTitulo">Asignar</h4>
+          <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px">
+            <h4 id="rapidaTitulo" style="margin-bottom:0">Asignar</h4>
+            <button class="btn" style="padding:2px 8px" onclick="cerrarRapida()" title="Cerrar sin esperar (si solo querías marcar una de las dos cosas)">✓ Cerrar</button>
+          </div>
           <div class="dorsales" id="rapidaDorsales"></div>
           <div class="resultados" id="rapidaResultados"></div>
           <div id="rapidaUbicacion" style="margin-top:4px"></div>
@@ -967,7 +972,7 @@ function abrirRapida(ev,cat){
   }else{
     plantilla.forEach(j=>{
       const b=document.createElement('button');
-      b.className='dorsal';
+      b.className='dorsal'+(ev.jugadorRef && ev.jugadorRef.id===j.id? ' on':'');
       b.innerHTML=`<span class="dorsal-n">${j.dorsal}</span>`+(j.nombre?`<span class="dorsal-nom">${j.nombre}</span>`:'');
       b.title=j.nombre||('Dorsal '+j.dorsal);
       b.onclick=()=>{ ev.jugadorRef={tipo:ev.equipo,id:j.id};
@@ -975,7 +980,13 @@ function abrirRapida(ev,cat){
         // más adelante, seguimos mostrando quién era en vez de romper la pantalla.
         ev.jugadorEtiqueta='#'+j.dorsal+(j.nombre?' '+j.nombre:'');
         pintarTimeline(); guardar();
-        cerrarRapida(); };
+        cd.querySelectorAll('.dorsal').forEach(x=>x.classList.remove('on'));
+        b.classList.add('on');
+        // Si la categoría también tiene resultados por marcar (p.ej. "Tiro": quién +
+        // a puerta/fuera), no se cierra solo por elegir jugador: se espera a que se
+        // marque lo otro también, para no obligar a reabrir el evento desde Eventos.
+        if(!faltaAlgoPorMarcarRapida(ev,cat)) cerrarRapida();
+      };
       cd.appendChild(b);
     });
   }
@@ -984,11 +995,13 @@ function abrirRapida(ev,cat){
   cr.innerHTML='';
   cat.resultados.forEach(r=>{
     const b=document.createElement('button');
-    b.className='res'; b.textContent=r;
+    b.className='res'+(ev.resultado===r? ' on':''); b.textContent=r;
     b.onclick=()=>{
       ev.resultado=r;
       guardar();
-      cerrarRapida();
+      cr.querySelectorAll('.res').forEach(x=>x.classList.remove('on'));
+      b.classList.add('on');
+      if(!faltaAlgoPorMarcarRapida(ev,cat)) cerrarRapida();
     };
     cr.appendChild(b);
   });
@@ -1009,6 +1022,15 @@ function cerrarRapida(){
   clearTimeout(tempRapida);
   document.getElementById('rapida').classList.remove('abierta');
   estado.pendiente=null;
+}
+// Si la categoría tiene jugadores Y resultados para elegir (p.ej. "Tiro"), hace falta
+// marcar los dos antes de cerrar solo; si solo tiene uno de los dos, con marcar ese
+// ya está. El botón "✓ Cerrar" de la propia rapida siempre puede saltarse esta espera.
+function faltaAlgoPorMarcarRapida(ev,cat){
+  const plantilla = ev.equipo==='propio'? estado.plantillaPropia : estado.plantillaRival;
+  const faltaJugador = plantilla.length>0 && !ev.jugadorRef;
+  const faltaResultado = cat.resultados.length>0 && !ev.resultado;
+  return faltaJugador || faltaResultado;
 }
 
 // Ajuste fino de t_in/t_out: se usa tanto desde el panel de asignación rápida
