@@ -500,10 +500,10 @@ input:focus,select:focus,button:focus-visible{outline:2px solid var(--rojo);outl
         </div>
         <div class="rapida" id="rapida">
           <h4 id="rapidaTitulo">Asignar</h4>
-          <div class="ajuste-tiempo" id="rapidaAjuste"></div>
           <div class="dorsales" id="rapidaDorsales"></div>
           <div class="resultados" id="rapidaResultados"></div>
           <div id="rapidaUbicacion" style="margin-top:4px"></div>
+          <div class="ajuste-tiempo" id="rapidaAjuste" style="margin-top:8px"></div>
         </div>
       </div>
       <div class="panel-marcaje">
@@ -975,7 +975,7 @@ function abrirRapida(ev,cat){
         // más adelante, seguimos mostrando quién era en vez de romper la pantalla.
         ev.jugadorEtiqueta='#'+j.dorsal+(j.nombre?' '+j.nombre:'');
         pintarTimeline(); guardar();
-        b.style.background='var(--rojo)'; };
+        cerrarRapida(); };
       cd.appendChild(b);
     });
   }
@@ -987,8 +987,8 @@ function abrirRapida(ev,cat){
     b.className='res'; b.textContent=r;
     b.onclick=()=>{
       ev.resultado=r;
-      cr.querySelectorAll('.res').forEach(x=>x.classList.remove('on'));
-      b.classList.add('on'); guardar();
+      guardar();
+      cerrarRapida();
     };
     cr.appendChild(b);
   });
@@ -1000,7 +1000,15 @@ function abrirRapida(ev,cat){
 
   caja.classList.add('abierta');
   clearTimeout(tempRapida);
-  tempRapida=setTimeout(()=>{ caja.classList.remove('abierta'); estado.pendiente=null; },12000);
+  // Cierre automático de respaldo, solo por si la categoría no tiene ni jugadores ni
+  // resultados que pulsar (o simplemente no tocas nada): en cuanto se pulsa un jugador
+  // o un resultado, cerrarRapida() cierra al momento sin esperar a este plazo.
+  tempRapida=setTimeout(cerrarRapida,12000);
+}
+function cerrarRapida(){
+  clearTimeout(tempRapida);
+  document.getElementById('rapida').classList.remove('abierta');
+  estado.pendiente=null;
 }
 
 // Ajuste fino de t_in/t_out: se usa tanto desde el panel de asignación rápida
