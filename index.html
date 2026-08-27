@@ -211,6 +211,7 @@ input:focus,select:focus,button:focus-visible{outline:2px solid var(--rojo);outl
 .cat.flash{background:var(--rojo);border-color:var(--rojo)}
 .cat.grabando{background:var(--rojo);border-color:var(--rojo);animation:pulso 1s ease-in-out infinite}
 @keyframes pulso{0%,100%{opacity:1}50%{opacity:.5}}
+#btnPausaMinutos.pausa-activa{background:var(--rojo);border-color:var(--rojo);animation:pulso 1s ease-in-out infinite}
 .cat b{display:block;font-family:var(--display);font-size:15px;font-weight:600;letter-spacing:.03em;
   text-transform:uppercase;line-height:1.1}
 .cat i{display:block;font-style:normal;font-size:10px;color:var(--muted);margin-top:3px}
@@ -367,6 +368,7 @@ input:focus,select:focus,button:focus-visible{outline:2px solid var(--rojo);outl
   <button class="btn" id="btnParte">1ª parte</button>
   <button class="btn" id="btnT0" title="Marca el saque inicial de la parte actual en este punto del vídeo">Fijar saque inicial</button>
   <button class="btn" id="btnTFin" title="Marca el final real de la parte actual en este punto del vídeo, para que lo que venga después (descanso, después del pitido…) no cuente como tiempo jugado">Finalizar tiempo</button>
+  <button class="btn" id="btnPausaMinutos" title="Para cuando el juego está parado de verdad (una persona atendida, incidencia...): mientras esté activo, ese tramo de vídeo no cuenta como minutos jugados para nadie, aunque haya quinteto marcado.">⏸ Pausar minutos</button>
   <div class="top-sep"></div>
   <button class="btn" id="btnProyectos">Proyectos</button>
   <button class="btn" id="btnPartido">Partido</button>
@@ -493,6 +495,10 @@ input:focus,select:focus,button:focus-visible{outline:2px solid var(--rojo);outl
     <div class="sec">
       <h3>Últimos cambios</h3>
       <div id="quintetoHistorial" style="font-size:11px;color:var(--muted)">Sin cambios todavía.</div>
+    </div>
+    <div class="sec">
+      <h3 title="Tramos marcados con el botón 'Pausar minutos' de arriba: no cuentan como tiempo jugado para nadie">Minutos en pausa</h3>
+      <div id="pausasLista" style="font-size:11px;color:var(--muted)">Sin pausas registradas.</div>
     </div>
   </div>
 </div>
@@ -638,6 +644,9 @@ const estado = {
   eventos:[],
   enPista:[],                  // ids (de plantillaPropia) en pista ahora mismo — vive en el proyecto
   cambiosQuinteto:[],          // histórico de entradas/salidas: {id,partidoId,t,jugadorId,dentro}
+  pausas:[],                   // tramos de vídeo sin juego real (lesión, incidencia...): {tIni,tFin}
+                                // — no cuentan como minutos jugados para nadie, aunque haya quinteto marcado
+  pausaAbierta:null,           // {tIni} mientras el botón "Pausar minutos" está activo, hasta que se cierra
   equipoActivo:'propio',
   parte:1,
   pxs:4,
@@ -1032,6 +1041,31 @@ function renderQuinteto(){
     cuenta.style.color = n===5? 'var(--ok)' : 'var(--warn)';
   }
   renderHistorialQuinteto();
+  renderPausasLista();
+}
+// Tramos marcados con "Pausar minutos": se listan igual que el historial de
+// quinteto, con opción de saltar al momento o borrar la pausa si te equivocaste.
+function renderPausasLista(){
+  const cont=document.getElementById('pausasLista');
+  if(!cont) return;
+  if(!estado.pausas.length && !estado.pausaAbierta){
+    cont.innerHTML='Sin pausas registradas.';
+    return;
+  }
+  const abierta = estado.pausaAbierta
+    ? `<div class="qh-fila"><span class="qh-out">En pausa desde ${tc(estado.pausaAbierta.tIni)}…</span></div>` : '';
+  const filas = estado.pausas.map((p,idx)=>({p,idx})).sort((a,b)=>b.p.tIni-a.p.tIni).map(({p,idx})=>`
+    <div class="qh-fila">
+      <span onclick="Reproductor.ir(${p.tIni})" title="Saltar a este momento" style="cursor:pointer">
+        ${tc(p.tIni)} → ${tc(p.tFin)} (${tc(p.tFin-p.tIni)})</span>
+      <span onclick="borrarPausa(${idx})" title="Borrar esta pausa" style="cursor:pointer;color:var(--rojo)">✕</span>
+    </div>`).join('');
+  cont.innerHTML = abierta + filas;
+}
+function borrarPausa(idx){
+  estado.pausas.splice(idx,1);
+  guardar();
+  renderPausasLista();
 }
 
 function renderHistorialQuinteto(){
@@ -1217,7 +1251,7 @@ function guardar(){
   try{
     const datos={partido:estado.partido, plantillaPropia:estado.plantillaPropia,
       plantillaRival:estado.plantillaRival, eventos:estado.eventos,
-      enPista:estado.enPista, cambiosQuinteto:estado.cambiosQuinteto,
+      enPista:estado.enPista, cambiosQuinteto:estado.cambiosQuinteto, pausas:estado.pausas,
       actualizado:new Date().toISOString()};
     db.transaction('proyectos','readwrite').objectStore('proyectos').put(datos, estado.partido.id);
     guardarConfigLocal();
@@ -1318,9 +1352,19 @@ function aplicarProyecto(id,datos){
   estado.eventos=datos.eventos || [];
   estado.enPista=datos.enPista || [];
   estado.cambiosQuinteto=datos.cambiosQuinteto || [];
+  estado.pausas=datos.pausas || [];
+  estado.pausaAbierta=null; // nunca se restaura abierta entre sesiones, para no dejarla olvidada sin querer
   estado.seleccion=null;
   estado.pendiente=null;
   estado.enCurso={};
+  actualizarBotonPausaMinutos();
+}
+function actualizarBotonPausaMinutos(){
+  const btn=document.getElementById('btnPausaMinutos');
+  if(!btn) return;
+  const activa=!!estado.pausaAbierta;
+  btn.classList.toggle('pausa-activa', activa);
+  btn.textContent = activa? '▶ Reanudar minutos' : '⏸ Pausar minutos';
 }
 
 // Vacía el visor (vídeo local o YouTube) para empezar un proyecto distinto.
@@ -1414,9 +1458,12 @@ function nuevoProyecto(mantenerPropia){
   estado.eventos=[];
   estado.enPista=[];
   estado.cambiosQuinteto=[];
+  estado.pausas=[];
+  estado.pausaAbierta=null;
   estado.seleccion=null;
   estado.pendiente=null;
   estado.enCurso={};
+  actualizarBotonPausaMinutos();
   guardar();
 }
 
@@ -1429,7 +1476,7 @@ function exportarJSON(){
     version:2, exportado:new Date().toISOString(),
     partido:partidoExport, categorias:todasLasCategorias(), plantillaPropia:estado.plantillaPropia,
     plantillaRival:estado.plantillaRival, eventos:estado.eventos,
-    enPista:estado.enPista, cambiosQuinteto:estado.cambiosQuinteto
+    enPista:estado.enPista, cambiosQuinteto:estado.cambiosQuinteto, pausas:estado.pausas
   };
   const blob=new Blob([JSON.stringify(datos,null,2)],{type:'application/json'});
   const a=document.createElement('a');
@@ -2378,6 +2425,23 @@ function solape(aIni,aFin,bIni,bFin){
   const s=Math.max(aIni,bIni), e=Math.min(aFin,bFin);
   return Math.max(0, e-s);
 }
+// Recorta un tramo [tIni,tFin) quitándole los huecos marcados con "Pausar minutos"
+// (lesión, incidencia... el juego estaba parado de verdad aunque el vídeo siguiera).
+// Devuelve la lista de sub-tramos que SÍ cuentan como tiempo jugado.
+function segmentosSinPausas(tIni, tFin){
+  let segmentos=[{tIni, tFin}];
+  [...estado.pausas].sort((a,b)=>a.tIni-b.tIni).forEach(p=>{
+    const siguientes=[];
+    segmentos.forEach(s=>{
+      const solapaIni=Math.max(s.tIni,p.tIni), solapaFin=Math.min(s.tFin,p.tFin);
+      if(solapaIni>=solapaFin){ siguientes.push(s); return; } // esta pausa no toca este sub-tramo
+      if(s.tIni<solapaIni) siguientes.push({tIni:s.tIni, tFin:solapaIni});
+      if(solapaFin<s.tFin) siguientes.push({tIni:solapaFin, tFin:s.tFin});
+    });
+    segmentos=siguientes;
+  });
+  return segmentos;
+}
 // Último instante con datos reales, para poder cerrar el último tramo en pista
 // (tFin:Infinity) aunque no tengas el vídeo cargado en este momento. Si ya
 // fijaste el final real de la 2ª parte, esa es la respuesta correcta siempre
@@ -2416,10 +2480,12 @@ function tiempoJugadoPorJugador(){
   intervalosQuinteto().forEach(iv=>{
     const tFinReal = iv.tFin===Infinity? fin : iv.tFin;
     if(tFinReal<=iv.tIni) return;
-    const {p1,p2} = repartirPorParte(iv.tIni, tFinReal);
-    iv.jugadores.forEach(id=>{
-      if(!acumulado.has(id)) acumulado.set(id,{p1:0,p2:0});
-      const o=acumulado.get(id); o.p1+=p1; o.p2+=p2;
+    segmentosSinPausas(iv.tIni, tFinReal).forEach(seg=>{
+      const {p1,p2} = repartirPorParte(seg.tIni, seg.tFin);
+      iv.jugadores.forEach(id=>{
+        if(!acumulado.has(id)) acumulado.set(id,{p1:0,p2:0});
+        const o=acumulado.get(id); o.p1+=p1; o.p2+=p2;
+      });
     });
   });
   return estado.plantillaPropia.map(j=>{
@@ -2593,6 +2659,11 @@ function renderEstadisticas(parte){
     if(estado.partido.tFin[2]==null){
       avisosMinutos.push('Todavía no has fijado el final de la 2ª parte ("Finalizar tiempo"): si el vídeo sigue '+
         'después del pitido final, ese tramo se está contando de más como jugado.');
+    }
+    if(estado.pausas.length){
+      const totalPausa = estado.pausas.reduce((s,p)=>s+(p.tFin-p.tIni),0);
+      avisosMinutos.push('Se han descontado '+estado.pausas.length+' pausa(s) de minutos ('+tc(totalPausa)+
+        ' en total) marcadas con "Pausar minutos".');
     }
     bloqueMinutos = `<div style="overflow-x:auto"><table class="tabla">
       <thead><tr><th>Jugador</th><th>1ª parte</th><th>2ª parte</th><th>Total</th></tr></thead>
@@ -3365,6 +3436,33 @@ document.getElementById('btnTFin').onclick=()=>{
   toast('Final de la '+estado.parte+'ª parte fijado en '+tc(Reproductor.tiempo())+
     '. El vídeo después de este punto ya no cuenta como tiempo jugado.');
 };
+// Pausar minutos: para tramos donde el juego está parado de verdad (una persona
+// atendida, incidencia...) aunque el vídeo siga grabando. Mientras está activo no
+// bloquea nada (se puede seguir marcando quinteto o categorías con normalidad) —
+// solo hace que ese tramo de vídeo no sume minutos jugados para nadie al calcular
+// Estadísticas, sea quien sea el quinteto que hubiera en pista.
+document.getElementById('btnPausaMinutos').onclick=()=>{
+  if(!Reproductor.tipo){ toast('Carga primero un vídeo.'); return; }
+  const btn=document.getElementById('btnPausaMinutos');
+  const t=Reproductor.tiempo();
+  if(estado.pausaAbierta){
+    const tIni=estado.pausaAbierta.tIni;
+    if(t>tIni) estado.pausas.push({tIni, tFin:t});
+    estado.pausaAbierta=null;
+    btn.classList.remove('pausa-activa');
+    btn.textContent='⏸ Pausar minutos';
+    guardar();
+    renderPausasLista();
+    toast('Reanudado en '+tc(t)+'. De '+tc(tIni)+' a '+tc(t)+' no cuenta como tiempo jugado.');
+  } else {
+    estado.pausaAbierta={tIni:t};
+    btn.classList.add('pausa-activa');
+    btn.textContent='▶ Reanudar minutos';
+    guardar();
+    renderPausasLista();
+    toast('Minutos en pausa desde '+tc(t)+'. Pulsa "Reanudar minutos" cuando vuelva el juego.');
+  }
+};
 
 // barra superior
 document.getElementById('btnProyectos').onclick=abrirProyectos;
@@ -3398,7 +3496,10 @@ document.getElementById('ficheroJson').onchange=e=>{
       estado.eventos=d.eventos||[];
       estado.enPista=d.enPista||[];
       estado.cambiosQuinteto=d.cambiosQuinteto||[];
+      estado.pausas=d.pausas||[];
+      estado.pausaAbierta=null;
       estado.enCurso={};
+      actualizarBotonPausaMinutos();
       guardar(); renderPanelCategorias(); pintarTimeline(); renderQuinteto();
       toast('Proyecto importado · '+estado.eventos.length+' eventos. Vuelve a cargar el vídeo.');
     }catch(err){ toast('Ese archivo no tiene el formato esperado.'); }
