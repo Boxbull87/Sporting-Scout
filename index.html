@@ -219,6 +219,12 @@ input:focus,select:focus,button:focus-visible{outline:2px solid var(--rojo);outl
   color:var(--muted);border:1px solid var(--line);border-radius:3px;padding:0 4px;line-height:15px;
 }
 .cat .franja{position:absolute;left:0;top:0;bottom:0;width:3px;border-radius:var(--radius) 0 0 var(--radius)}
+/* Categorías con equipo fijo (Propio/Rival), en vez de seguir al interruptor de arriba */
+.cat-equipo{display:block;font-style:normal;font-size:9px;font-weight:700;letter-spacing:.08em;
+  text-transform:uppercase;margin-top:2px}
+.cat-propio .cat-equipo{color:var(--rojo)}
+.cat-rival .cat-equipo{color:#2E6FB7}
+.cats-compacto .cat-equipo,.cats-mini .cat-equipo{display:none}
 
 /* Densidad automática: cuando el panel de marcaje se achica y las categorías no
    caben, en vez de recortarlas por abajo (hay que hacer scroll y no se ven todas
@@ -785,7 +791,7 @@ function nuevoEvento(cat,t_in,t_out,t_mark,corte){
     t_mark: t_mark,
     t_in: t_in,
     t_out: t_out,
-    equipo: estado.equipoActivo,
+    equipo: cat.equipoFijo || estado.equipoActivo,  // categoría con equipo fijo ('propio'/'rival') manda sobre el interruptor
     jugadorRef: null,            // {tipo:'propio'|'rival', id}
     resultado: null,
     parte: estado.parte,
@@ -2795,6 +2801,7 @@ function renderCategorias(){
     <td>${c.stats===false?'No':'Sí'}</td>
     <td>${c.cruzaQuinteto?'Sí':'No'}</td>
     <td>${[c.indGol?'Gol':null, c.indOcasion?'Ocasión':null].filter(Boolean).join(', ')||'—'}</td>
+    <td>${c.equipoFijo==='propio'?'Propio':c.equipoFijo==='rival'?'Rival':'Interruptor'}</td>
     <td>${c.ubicacion==='medio'?'Medio campo':c.ubicacion==='entero'?'Campo entero':'—'}</td>
     <td>${c.activa===false?'Inactiva':'Activa'}</td>
     <td style="text-align:right;white-space:nowrap">
@@ -2821,7 +2828,7 @@ function renderCategorias(){
     <h3 style="font-family:var(--display);font-size:16px;text-transform:uppercase;letter-spacing:.05em;margin-bottom:10px">
       Categorías de "${panelActivo?panelActivo.nombre:''}"</h3>
     <div style="overflow-x:auto"><table class="tabla" style="margin-bottom:16px">
-      <thead><tr><th>Nombre</th><th>Tecla</th><th>Modo</th><th>En estadísticas</th><th>Quinteto</th><th>Individual</th><th>Ubicación</th><th>Estado</th><th></th></tr></thead>
+      <thead><tr><th>Nombre</th><th>Tecla</th><th>Modo</th><th>En estadísticas</th><th>Quinteto</th><th>Individual</th><th>Equipo</th><th>Ubicación</th><th>Estado</th><th></th></tr></thead>
       <tbody>${filas}</tbody>
     </table></div>
     <h3 style="font-family:var(--display);font-size:16px;text-transform:uppercase;letter-spacing:.05em;margin-bottom:10px">
@@ -2860,6 +2867,14 @@ function renderCategorias(){
       <label style="display:flex;align-items:center;gap:6px;font-size:12px" title="En Estadísticas → Rendimiento individual, cada evento de esta categoría cuenta como Ocasión (a favor si es del equipo propio, en contra si es del rival) para todos los jugadores que estaban en pista en ese momento">
         <input type="checkbox" id="cIndOcasion" ${editando&&editando.indOcasion?'checked':''}> Cuenta como Ocasión (individual)
       </label>
+      <div class="campo" title="Si fijas Propio o Rival, esta categoría marca siempre para ese equipo, ignorando el interruptor Propio/Rival de arriba (útil para tener, p.ej., 'Gol propio' y 'Gol rival' como botones separados).">
+        <label>Equipo</label>
+        <select id="cEquipoFijo">
+          <option value="" ${!editando||!editando.equipoFijo?'selected':''}>Según interruptor</option>
+          <option value="propio" ${editando&&editando.equipoFijo==='propio'?'selected':''}>Propio (fijo)</option>
+          <option value="rival" ${editando&&editando.equipoFijo==='rival'?'selected':''}>Rival (fijo)</option>
+        </select>
+      </div>
       <div class="campo" title="Al marcar un evento de esta categoría, se pausa el vídeo y aparece el campo para hacer clic dónde ha ocurrido. Luego se puede ver en Estadísticas.">
         <label>Ubicación en el campo</label>
         <select id="cUbicacion">
@@ -2887,6 +2902,7 @@ function guardarCategoria(){
   const indGol = document.getElementById('cIndGol').checked;
   const indOcasion = document.getElementById('cIndOcasion').checked;
   const ubicacion = document.getElementById('cUbicacion').value || null;
+  const equipoFijo = document.getElementById('cEquipoFijo').value || null;
 
   if(!nom){ toast('Ponle un nombre a la categoría.'); return; }
   if(tecla.length!==1){ toast('La tecla debe ser un solo carácter.'); return; }
@@ -2899,10 +2915,10 @@ function guardarCategoria(){
 
   if(editandoCategoria){
     const c = estado.categorias.find(c=>c.id===editandoCategoria);
-    Object.assign(c,{nom,corto,tecla,color,modo,pre,post,resultados,stats,cruzaQuinteto,indGol,indOcasion,ubicacion});
+    Object.assign(c,{nom,corto,tecla,color,modo,pre,post,resultados,stats,cruzaQuinteto,indGol,indOcasion,ubicacion,equipoFijo});
   } else {
     estado.categorias.push({id:idUnicoCategoria(nom), nom, corto, tecla, color, pre, post, modo,
-      resultados, stats, cruzaQuinteto, indGol, indOcasion, ubicacion, activa:true});
+      resultados, stats, cruzaQuinteto, indGol, indOcasion, ubicacion, equipoFijo, activa:true});
   }
   editandoCategoria=null;
   guardarPanelActivo();
@@ -2991,7 +3007,7 @@ function borrarPanelDesdeForm(id){
 function abrirAyuda(){
   const panel = estado.paneles.find(p=>p.id===estado.panelActivoId);
   const cats = catsActivasDePanel(estado.panelActivoId);
-  const filaCat=(c)=>`<div class="atajo"><kbd>${c.tecla}</kbd> ${c.nom}${c.modo==='manual'?' (activar/parar)':''}</div>`;
+  const filaCat=(c)=>`<div class="atajo"><kbd>${c.tecla}</kbd> ${c.nom}${c.modo==='manual'?' (activar/parar)':''}${c.equipoFijo?' · '+(c.equipoFijo==='propio'?'Propio':'Rival')+' fijo':''}</div>`;
   const lista = cats.map(filaCat).join('');
 
   modal('Atajos de teclado', `
@@ -3044,10 +3060,13 @@ function pintarGridCategorias(contId, panelId){
   cont.innerHTML='';
   catsActivasDePanel(panelId).forEach(c=>{
     const b=document.createElement('button');
-    b.className='cat'; b.dataset.cat=c.id;
+    b.className='cat'+(c.equipoFijo? ' cat-'+c.equipoFijo : ''); b.dataset.cat=c.id;
+    const insigniaEquipo = c.equipoFijo
+      ? `<span class="cat-equipo">${c.equipoFijo==='propio'?'Propio':'Rival'}</span>` : '';
     b.innerHTML=`<span class="franja" style="background:${c.color}"></span>
       <span class="tecla">${c.tecla}</span><b>${c.nom}</b>
-      <i>${c.modo==='manual'? 'activar / parar' : '−'+c.pre+'s / +'+c.post+'s'}</i>`;
+      <i>${c.modo==='manual'? 'activar / parar' : '−'+c.pre+'s / +'+c.post+'s'}</i>
+      ${insigniaEquipo}`;
     b.onclick=()=>marcar(c.id, modoRatonCorte);
     cont.appendChild(b);
   });
