@@ -135,11 +135,17 @@ input:focus,select:focus,button:focus-visible{outline:2px solid var(--rojo);outl
 
 /* ---------- MODO DIBUJO (telestrator sobre el vídeo pausado, solo local) ---------- */
 #dibujoCanvas{position:absolute;z-index:15;cursor:crosshair;touch-action:none}
+/* Anclada a una esquina y con ancho limitado (no de lado a lado) para tapar lo
+   menos posible del vídeo mientras se dibuja — antes ocupaba todo el ancho y
+   podía llegar a cubrir el vídeo entero si este quedaba con poca altura.
+   btnDibujoPlegar la reduce a solo la cabecera si aun así molesta. */
 .dibujo-barra{
-  position:absolute;top:8px;left:8px;right:8px;z-index:16;
-  background:rgba(14,16,19,.94);border:1px solid var(--line);border-radius:8px;
-  padding:8px 10px;display:flex;flex-direction:column;gap:7px;
+  position:absolute;top:8px;right:8px;z-index:16;width:min(300px, calc(100% - 16px));
+  max-height:calc(100% - 16px);overflow-y:auto;
+  background:rgba(14,16,19,.9);border:1px solid var(--line);border-radius:8px;
+  padding:7px 9px;display:flex;flex-direction:column;gap:6px;
 }
+.dibujo-barra.plegada #dibujoCuerpo{display:none}
 .dibujo-fila{display:flex;align-items:center;gap:6px;flex-wrap:wrap}
 .dtool{width:30px;height:30px;flex:none;border:1px solid var(--line);border-radius:6px;
   background:var(--panel-2);font-size:15px;line-height:1}
@@ -441,31 +447,39 @@ input:focus,select:focus,button:focus-visible{outline:2px solid var(--rojo);outl
       <div id="ytHost"></div>
       <canvas id="dibujoCanvas" class="hidden"></canvas>
       <div class="dibujo-barra hidden" id="dibujoBarra">
-        <div class="dibujo-fila">
-          <button class="dtool on" data-tool="lapiz" title="Lápiz">✏️</button>
-          <button class="dtool" data-tool="flecha" title="Flecha">↗️</button>
-          <button class="dtool" data-tool="linea" title="Línea">╱</button>
-          <button class="dtool" data-tool="circulo" title="Círculo">⭕</button>
-          <button class="dtool" data-tool="rectangulo" title="Rectángulo">▭</button>
-          <button class="dtool" data-tool="texto" title="Texto">🔤</button>
-          <span style="flex:none;width:1px;height:20px;background:var(--line);margin:0 4px"></span>
-          <button class="dcolor on" data-color="#D8232A" style="background:#D8232A" title="Rojo"></button>
-          <button class="dcolor" data-color="#3FB27F" style="background:#3FB27F" title="Verde"></button>
-          <button class="dcolor" data-color="#2E6FB7" style="background:#2E6FB7" title="Azul"></button>
-          <button class="dcolor" data-color="#E0A32E" style="background:#E0A32E" title="Amarillo"></button>
-          <button class="dcolor" data-color="#FFFFFF" style="background:#FFFFFF" title="Blanco"></button>
-          <span style="flex:none;width:1px;height:20px;background:var(--line);margin:0 4px"></span>
-          <button class="btn" id="btnDibujoGrosor" style="padding:4px 8px" title="Grosor del trazo">Fino</button>
-          <button class="btn" id="btnDibujoDeshacer" style="padding:4px 8px">↩ Deshacer</button>
-          <button class="btn" id="btnDibujoBorrar" style="padding:4px 8px">🗑 Borrar todo</button>
+        <div class="dibujo-fila" style="justify-content:space-between;margin-bottom:1px">
+          <b style="font-size:10px;letter-spacing:.1em;text-transform:uppercase;color:var(--muted)">✏️ Dibujar</b>
+          <button class="btn" id="btnDibujoPlegar" style="padding:2px 7px" title="Plegar para ver el vídeo completo">▾</button>
         </div>
-        <div class="dibujo-fila" id="dibujoMomentos"></div>
-        <div class="dibujo-fila">
-          <span id="dibujoInfo" style="color:var(--muted);font-size:11px"></span>
-          <span style="flex:1"></span>
-          <button class="btn" id="btnDibujoBorrarMomento" style="padding:4px 8px;display:none">🗑 Borrar momento</button>
-          <button class="btn btn-rojo" id="btnDibujoGuardar" style="padding:4px 8px">💾 Guardar momento</button>
-          <button class="btn" id="btnDibujoCerrar" style="padding:4px 8px">Cerrar</button>
+        <div id="dibujoCuerpo">
+          <div class="dibujo-fila">
+            <button class="dtool on" data-tool="lapiz" title="Lápiz">✏️</button>
+            <button class="dtool" data-tool="flecha" title="Flecha">↗️</button>
+            <button class="dtool" data-tool="linea" title="Línea">╱</button>
+            <button class="dtool" data-tool="circulo" title="Círculo">⭕</button>
+            <button class="dtool" data-tool="rectangulo" title="Rectángulo">▭</button>
+            <button class="dtool" data-tool="texto" title="Texto">🔤</button>
+          </div>
+          <div class="dibujo-fila">
+            <button class="dcolor on" data-color="#D8232A" style="background:#D8232A" title="Rojo"></button>
+            <button class="dcolor" data-color="#3FB27F" style="background:#3FB27F" title="Verde"></button>
+            <button class="dcolor" data-color="#2E6FB7" style="background:#2E6FB7" title="Azul"></button>
+            <button class="dcolor" data-color="#E0A32E" style="background:#E0A32E" title="Amarillo"></button>
+            <button class="dcolor" data-color="#FFFFFF" style="background:#FFFFFF" title="Blanco"></button>
+            <span style="flex:none;width:1px;height:20px;background:var(--line);margin:0 2px"></span>
+            <button class="btn" id="btnDibujoGrosor" style="padding:4px 7px" title="Grosor del trazo">Fino</button>
+          </div>
+          <div class="dibujo-fila">
+            <button class="btn" id="btnDibujoDeshacer" style="padding:4px 7px">↩ Deshacer</button>
+            <button class="btn" id="btnDibujoBorrar" style="padding:4px 7px">🗑 Borrar todo</button>
+          </div>
+          <div class="dibujo-fila" id="dibujoMomentos"></div>
+          <div class="dibujo-fila" style="color:var(--muted);font-size:11px" id="dibujoInfo"></div>
+          <div class="dibujo-fila">
+            <button class="btn" id="btnDibujoBorrarMomento" style="padding:4px 7px;display:none">🗑 Borrar</button>
+            <button class="btn btn-rojo" id="btnDibujoGuardar" style="padding:4px 7px">💾 Guardar</button>
+            <button class="btn" id="btnDibujoCerrar" style="padding:4px 7px">Cerrar</button>
+          </div>
         </div>
       </div>
       <div class="fuente" id="fuente">
@@ -984,7 +998,9 @@ function abrirModoDibujo(evId){
   if(!ev.dibujos) ev.dibujos=[];
   dibujoEstado={evId, herramienta:'lapiz', color:'#D8232A', grosor:3, trazos:[], momentoIdx:null};
   document.getElementById('dibujoCanvas').classList.remove('hidden');
-  document.getElementById('dibujoBarra').classList.remove('hidden');
+  const barra=document.getElementById('dibujoBarra');
+  barra.classList.remove('hidden','plegada');
+  document.getElementById('btnDibujoPlegar').textContent='▾';
   window.addEventListener('resize', posicionarCanvasDibujo);
   posicionarCanvasDibujo();
   pintarChipsMomentosDibujo();
@@ -1450,7 +1466,7 @@ function pintarTimeline(){
     d.style.background=cat.color;
     d.style.opacity = ev.equipo==='rival'? .55 : 1;
     d.title=etiquetaEvento(ev);
-    d.onclick=(e)=>{ e.stopPropagation(); seleccionar(ev.id); Reproductor.ir(ev.t_in); Reproductor.play(); };
+    d.onclick=(e)=>{ e.stopPropagation(); seleccionar(ev.id); reproducirTramo(ev.t_in, ev.t_out); };
     lienzo.appendChild(d);
   });
 
@@ -2442,7 +2458,7 @@ function abrirEventos(){
         <button class="btn" style="padding:0 4px" onclick="ajustarTiempo('${ev.id}','t_out',1)">+</button>
       </td>
       <td style="text-align:right;white-space:nowrap">
-        <button class="btn" style="padding:2px 6px" onclick="irA(${ev.t_in})">Ver</button>
+        <button class="btn" style="padding:2px 6px" onclick="verEvento('${ev.id}')">Ver</button>
         <button class="btn" style="padding:2px 6px" onclick="descargarClipUnico('${ev.id}')" ${puedeClip?'':'disabled'} ${tituloSinClip}>Descargar</button>
         <button class="btn" style="padding:2px 6px" onclick="borrarEvento('${ev.id}')">Borrar</button>
       </td></tr>`;
@@ -2494,7 +2510,37 @@ function abrirEventos(){
     <div style="overflow-x:auto"><table class="tabla"><thead><tr><th></th><th>Min</th><th>Categoría</th><th>Equipo</th><th>Jugador</th>
      <th>Resultado</th><th>Corte</th><th>Ubic.</th><th>Dibujo</th><th>Clip</th><th></th></tr></thead><tbody>${filas}</tbody></table></div>`);
 }
-function irA(t){ cerrarModal(); Reproductor.ir(t); Reproductor.play(); }
+// Reproducir "solo este evento": al llegar a tLimite se para sola, en vez de
+// seguir hasta el final del vídeo. Si mientras tanto pausas tú a mano antes de
+// llegar, se deja de vigilar (para que un play posterior no te pare de golpe
+// en un límite que ya no pintaba nada).
+let paradaProgramada=null;
+function cancelarParadaProgramada(){
+  if(paradaProgramada){ clearInterval(paradaProgramada); paradaProgramada=null; }
+}
+function programarParadaEnTiempo(tLimite){
+  cancelarParadaProgramada();
+  if(tLimite==null) return;
+  paradaProgramada=setInterval(()=>{
+    if(!Reproductor.reproduciendo()){ cancelarParadaProgramada(); return; }
+    if(Reproductor.tiempo()>=tLimite){ Reproductor.pausa(); botonPlay(); cancelarParadaProgramada(); }
+  }, 120);
+}
+function reproducirConLimite(tLimite){
+  Reproductor.play();
+  programarParadaEnTiempo(tLimite);
+}
+function reproducirTramo(tIni, tFin){
+  cancelarParadaProgramada();
+  Reproductor.ir(tIni);
+  reproducirConLimite(tFin);
+}
+function verEvento(id){
+  const ev=estado.eventos.find(e=>e.id===id);
+  if(!ev) return;
+  cerrarModal();
+  reproducirTramo(ev.t_in, ev.t_out);
+}
 function toggleCorte(id){
   const ev=estado.eventos.find(e=>e.id===id);
   if(!ev || !categoriaGeneraClip(ev.tipo)) return;
@@ -3845,6 +3891,11 @@ document.getElementById('btnDibujoBorrar').onclick=()=>{
 document.getElementById('btnDibujoGuardar').onclick=guardarMomentoDibujo;
 document.getElementById('btnDibujoBorrarMomento').onclick=borrarMomentoDibujo;
 document.getElementById('btnDibujoCerrar').onclick=cerrarModoDibujo;
+document.getElementById('btnDibujoPlegar').onclick=(e)=>{
+  const plegada=document.getElementById('dibujoBarra').classList.toggle('plegada');
+  e.target.textContent = plegada? '▸':'▾';
+  e.target.title = plegada? 'Desplegar para volver a las herramientas':'Plegar para ver el vídeo completo';
+};
 const dibujoCanvasEl=document.getElementById('dibujoCanvas');
 dibujoCanvasEl.addEventListener('pointerdown', iniciarTrazoDibujo);
 dibujoCanvasEl.addEventListener('pointermove', moverTrazoDibujo);
@@ -4122,7 +4173,15 @@ document.addEventListener('keydown',e=>{
   }
   if(dibujoEstado){
     if(e.key==='Escape'){ cerrarModoDibujo(); return; }
-    if(e.key===' '){ e.preventDefault(); Reproductor.alternar(); setTimeout(botonPlay,60); return; }
+    if(e.key===' '){
+      e.preventDefault();
+      // al reanudar mientras se dibuja, tampoco sigue de largo: se para sola al
+      // llegar al final de ESTE evento, no hace falta pausarla tú a tiempo.
+      if(Reproductor.reproduciendo()) Reproductor.pausa();
+      else{ const evD=eventoDibujoActual(); reproducirConLimite(evD? evD.t_out : null); }
+      setTimeout(botonPlay,60);
+      return;
+    }
     if(e.key==='ArrowLeft'){ e.preventDefault(); Reproductor.salto(e.shiftKey?-5:-1); return; }
     if(e.key==='ArrowRight'){ e.preventDefault(); Reproductor.salto(e.shiftKey?5:1); return; }
     if(e.key===','){ Reproductor.frame(-1); return; }
