@@ -2533,6 +2533,12 @@ function esperarSeek(video){
 }
 
 async function capturarClip(ev){
+  // Si el clip tiene algún momento dibujado dentro de su propio rango, se graba
+  // distinto (vídeo + trazos quemados sobre un canvas, con congelados) — ver
+  // capturarClipConDibujo(). Si no, el camino de siempre: se graba el vídeo tal cual.
+  const momentos = (ev.dibujos||[]).filter(m=>m.t>=ev.t_in && m.t<=ev.t_out).sort((a,b)=>a.t-b.t);
+  if(momentos.length) return capturarClipConDibujo(ev, momentos);
+
   const video=document.getElementById('vidLocal');
   const velocidadPrevia=video.playbackRate;
   video.pause();
@@ -2556,6 +2562,75 @@ async function capturarClip(ev){
     };
     paso();
   });
+  video.pause();
+  rec.stop();
+  await terminado;
+  video.playbackRate=velocidadPrevia;
+
+  return {blob:new Blob(trozos,{type:mime||'video/webm'}), ext: mime.includes('mp4')?'mp4':'webm'};
+}
+
+// Graba el clip dibujando cada fotograma (vídeo + trazos) en un canvas propio y
+// capturando ESE canvas en vez del vídeo directo — así el dibujo queda "quemado"
+// en el archivo exportado. Al llegar a un momento dibujado, el vídeo se pausa y el
+// canvas se queda pintando ese mismo fotograma + los trazos durante su duración
+// (tiempo real, no de vídeo: la grabación sigue corriendo mientras tanto), y
+// luego continúa. momentos ya viene filtrado a los que caen dentro del clip y
+// ordenado por instante.
+async function capturarClipConDibujo(ev, momentos){
+  const video=document.getElementById('vidLocal');
+  const velocidadPrevia=video.playbackRate;
+  video.pause();
+  video.playbackRate=1;
+  video.currentTime=ev.t_in;
+  await esperarSeek(video);
+
+  const cv=document.createElement('canvas');
+  cv.width=video.videoWidth||640; cv.height=video.videoHeight||360;
+  const ctx=cv.getContext('2d');
+  if(!cv.captureStream) throw new Error('Tu navegador no soporta grabar un lienzo (captureStream).');
+  const stream=cv.captureStream(30);
+  const mime=elegirMimeClip();
+  const rec=new MediaRecorder(stream, mime? {mimeType:mime} : undefined);
+  const trozos=[];
+  rec.ondataavailable=e=>{ if(e.data && e.data.size) trozos.push(e.data); };
+  const terminado=new Promise((res,rej)=>{ rec.onstop=res; rec.onerror=rej; });
+
+  rec.start();
+  const pendientes=momentos.slice();
+  let trazosVisibles=[];
+  const pintar=()=>{
+    ctx.drawImage(video,0,0,cv.width,cv.height);
+    trazosVisibles.forEach(t=>dibujarTrazoDibujo(ctx,cv,t));
+  };
+  // setTimeout en vez de requestAnimationFrame a propósito: rAF se pausa del todo
+  // si la pestaña queda en segundo plano (minimizada, cambias de pestaña durante
+  // una exportación larga), lo que dejaría este bucle colgado para siempre. Con
+  // setTimeout, en el peor caso se ralentiza, pero nunca se queda parado del todo.
+  const espera=ms=>new Promise(r=>setTimeout(r,ms));
+
+  await video.play();
+  let parar=false;
+  while(!parar){
+    if(cancelarExport || video.ended || video.currentTime>=ev.t_out){ parar=true; break; }
+    if(pendientes.length && video.currentTime>=pendientes[0].t){
+      const m=pendientes.shift();
+      video.pause();
+      trazosVisibles=m.trazos;
+      const finCongelado=performance.now()+Math.max(0.2,m.duracion||2.5)*1000;
+      while(performance.now()<finCongelado){
+        if(cancelarExport){ parar=true; break; }
+        pintar();
+        await espera(33);
+      }
+      trazosVisibles=[];
+      if(parar || video.currentTime>=ev.t_out) break;
+      await video.play();
+      continue;
+    }
+    pintar();
+    await espera(33);
+  }
   video.pause();
   rec.stop();
   await terminado;
