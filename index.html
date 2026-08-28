@@ -2655,6 +2655,12 @@ function abrirEventos(){
         (con sus dibujos si tienen). Funciona con vídeo local o YouTube.</span>
     </div>
     <div class="fila-form" style="margin-bottom:6px">
+      <button class="btn btn-rojo" onclick="exportarResumenComoVideo(Array.from(document.querySelectorAll('.chk-export:checked')).map(c=>c.dataset.id))" ${esLocal?'':'disabled'}>🎬 Exportar como un solo vídeo</button>
+      <span style="color:var(--muted);font-size:11px;max-width:280px">
+        Une los marcados arriba en un único archivo, en orden cronológico y con sus dibujos
+        quemados. Además de "Descargar clips seleccionados" (uno a uno), no en su lugar.</span>
+    </div>
+    <div class="fila-form" style="margin-bottom:6px">
       <button class="btn btn-rojo" onclick="descargarClipsDirecto()" ${esLocal?'':'disabled'}>Descargar clips seleccionados</button>
       <span style="color:var(--muted);font-size:11px;max-width:280px">
         Recomendado: descarga directa desde el navegador, sin instalar nada. Graba en tiempo real
@@ -2895,20 +2901,61 @@ async function capturarClip(ev){
   return {blob:new Blob(trozos,{type:mime||'video/webm'}), ext: mime.includes('mp4')?'mp4':'webm'};
 }
 
+// setTimeout en vez de requestAnimationFrame a propósito: rAF se pausa del todo
+// si la pestaña queda en segundo plano (minimizada, cambias de pestaña durante
+// una exportación larga), lo que dejaría el bucle colgado para siempre. Con
+// setTimeout, en el peor caso se ralentiza, pero nunca se queda parado del todo.
+function esperaExport(ms){ return new Promise(r=>setTimeout(r,ms)); }
+
+// Reproduce ev.t_in..ev.t_out dibujando cada fotograma (vídeo + trazos de
+// cualquier momento dibujado dentro del rango) en un canvas YA ABIERTO — no
+// abre ni cierra ningún MediaRecorder, eso lo hace quien llama. Así lo puede
+// usar tanto un clip suelto (capturarClipConDibujo) como una exportación de
+// varios eventos seguidos en un único archivo (exportarResumenComoVideo),
+// sin cortar la grabación entre uno y otro.
+async function reproducirEventoEnCanvas(ev, video, ctx, cv){
+  video.currentTime=ev.t_in;
+  await esperarSeek(video);
+  const pendientes=(ev.dibujos||[]).filter(m=>m.t>=ev.t_in && m.t<=ev.t_out).sort((a,b)=>a.t-b.t);
+  let trazosVisibles=[];
+  const pintar=()=>{
+    ctx.drawImage(video,0,0,cv.width,cv.height);
+    trazosVisibles.forEach(t=>dibujarTrazoDibujo(ctx,cv,t));
+  };
+  await video.play();
+  let parar=false;
+  while(!parar){
+    if(cancelarExport || video.ended || video.currentTime>=ev.t_out){ parar=true; break; }
+    if(pendientes.length && video.currentTime>=pendientes[0].t){
+      const m=pendientes.shift();
+      video.pause();
+      trazosVisibles=m.trazos;
+      const finCongelado=performance.now()+Math.max(0.2,m.duracion||2.5)*1000;
+      while(performance.now()<finCongelado){
+        if(cancelarExport){ parar=true; break; }
+        pintar();
+        await esperaExport(33);
+      }
+      trazosVisibles=[];
+      if(parar || video.currentTime>=ev.t_out) break;
+      await video.play();
+      continue;
+    }
+    pintar();
+    await esperaExport(33);
+  }
+}
+
 // Graba el clip dibujando cada fotograma (vídeo + trazos) en un canvas propio y
 // capturando ESE canvas en vez del vídeo directo — así el dibujo queda "quemado"
-// en el archivo exportado. Al llegar a un momento dibujado, el vídeo se pausa y el
-// canvas se queda pintando ese mismo fotograma + los trazos durante su duración
-// (tiempo real, no de vídeo: la grabación sigue corriendo mientras tanto), y
-// luego continúa. momentos ya viene filtrado a los que caen dentro del clip y
-// ordenado por instante.
+// en el archivo exportado. momentos no se usa aquí (reproducirEventoEnCanvas ya
+// filtra los propios de ev.dibujos); se mantiene el parámetro para no tocar la
+// firma que ya usa capturarClip().
 async function capturarClipConDibujo(ev, momentos){
   const video=document.getElementById('vidLocal');
   const velocidadPrevia=video.playbackRate;
   video.pause();
   video.playbackRate=1;
-  video.currentTime=ev.t_in;
-  await esperarSeek(video);
 
   const cv=document.createElement('canvas');
   cv.width=video.videoWidth||640; cv.height=video.videoHeight||360;
@@ -2922,46 +2969,79 @@ async function capturarClipConDibujo(ev, momentos){
   const terminado=new Promise((res,rej)=>{ rec.onstop=res; rec.onerror=rej; });
 
   rec.start();
-  const pendientes=momentos.slice();
-  let trazosVisibles=[];
-  const pintar=()=>{
-    ctx.drawImage(video,0,0,cv.width,cv.height);
-    trazosVisibles.forEach(t=>dibujarTrazoDibujo(ctx,cv,t));
-  };
-  // setTimeout en vez de requestAnimationFrame a propósito: rAF se pausa del todo
-  // si la pestaña queda en segundo plano (minimizada, cambias de pestaña durante
-  // una exportación larga), lo que dejaría este bucle colgado para siempre. Con
-  // setTimeout, en el peor caso se ralentiza, pero nunca se queda parado del todo.
-  const espera=ms=>new Promise(r=>setTimeout(r,ms));
-
-  await video.play();
-  let parar=false;
-  while(!parar){
-    if(cancelarExport || video.ended || video.currentTime>=ev.t_out){ parar=true; break; }
-    if(pendientes.length && video.currentTime>=pendientes[0].t){
-      const m=pendientes.shift();
-      video.pause();
-      trazosVisibles=m.trazos;
-      const finCongelado=performance.now()+Math.max(0.2,m.duracion||2.5)*1000;
-      while(performance.now()<finCongelado){
-        if(cancelarExport){ parar=true; break; }
-        pintar();
-        await espera(33);
-      }
-      trazosVisibles=[];
-      if(parar || video.currentTime>=ev.t_out) break;
-      await video.play();
-      continue;
-    }
-    pintar();
-    await espera(33);
-  }
+  await reproducirEventoEnCanvas(ev, video, ctx, cv);
   video.pause();
   rec.stop();
   await terminado;
   video.playbackRate=velocidadPrevia;
 
   return {blob:new Blob(trozos,{type:mime||'video/webm'}), ext: mime.includes('mp4')?'mp4':'webm'};
+}
+
+/* =====================================================================
+   EXPORTAR RESUMEN COMO UN SOLO VÍDEO
+   Misma mecánica que un clip con dibujo, pero sin parar la grabación entre
+   eventos: al acabar uno salta directo al siguiente (mismo canvas, mismo
+   MediaRecorder), así el archivo final los tiene todos seguidos, en orden
+   cronológico, con los dibujos quemados si tienen. Esto es ADEMÁS de
+   "Descargar clips seleccionados" (uno a uno), no lo sustituye — sigue
+   disponible igual que siempre para quien prefiera archivos por separado.
+   Solo vídeo local; solo entran los eventos con clip habilitado (mismo
+   criterio que la descarga individual — "Corte" activado).
+   ===================================================================== */
+async function exportarResumenComoVideo(ids){
+  if(Reproductor.tipo!=='local'){ toast('Carga el vídeo local del partido para exportar un vídeo.'); return; }
+  if(!soportaDescargaDirecta()){ toast('Tu navegador no soporta la descarga directa. Usa Chrome o Edge actualizados.'); return; }
+  const eventos=estado.eventos.filter(e=>ids.includes(e.id) && eventoGeneraClip(e)).sort((a,b)=>a.t_in-b.t_in);
+  if(!eventos.length){ toast('Ninguno de los eventos marcados se puede exportar (revisa que tengan "Corte" activado).'); return; }
+
+  cancelarExport=false;
+  cerrarModal();
+  abrirExportOverlay();
+
+  const video=document.getElementById('vidLocal');
+  const velocidadPrevia=video.playbackRate;
+  video.pause();
+  video.playbackRate=1;
+
+  let blob=null, ext='webm';
+  try{
+    const cv=document.createElement('canvas');
+    cv.width=video.videoWidth||640; cv.height=video.videoHeight||360;
+    const ctx=cv.getContext('2d');
+    if(!cv.captureStream) throw new Error('Tu navegador no soporta grabar un lienzo (captureStream).');
+    const stream=cv.captureStream(30);
+    const mime=elegirMimeClip();
+    const rec=new MediaRecorder(stream, mime? {mimeType:mime} : undefined);
+    const trozos=[];
+    rec.ondataavailable=e=>{ if(e.data && e.data.size) trozos.push(e.data); };
+    const terminado=new Promise((res,rej)=>{ rec.onstop=res; rec.onerror=rej; });
+
+    rec.start();
+    for(let i=0;i<eventos.length && !cancelarExport;i++){
+      actualizarExportOverlay(i+1, eventos.length, eventos[i]);
+      await reproducirEventoEnCanvas(eventos[i], video, ctx, cv);
+    }
+    video.pause();
+    rec.stop();
+    await terminado;
+    ext=mime.includes('mp4')?'mp4':'webm';
+    blob=new Blob(trozos,{type:mime||'video/webm'});
+  }catch(err){
+    toast('No se pudo generar el vídeo: '+err.message);
+  }
+  video.playbackRate=velocidadPrevia;
+  cerrarExportOverlay();
+
+  if(blob && !cancelarExport){
+    const a=document.createElement('a');
+    a.href=URL.createObjectURL(blob);
+    a.download='resumen_'+limpiarNombre(estado.partido.equipoRival||'partido')+'_'+estado.partido.fecha+'.'+ext;
+    a.click();
+    toast('Vídeo del resumen descargado · '+eventos.length+' eventos.');
+  }else if(cancelarExport){
+    toast('Exportación cancelada.');
+  }
 }
 
 function abrirExportOverlay(){ document.getElementById('modalExport').classList.add('abierto'); }
