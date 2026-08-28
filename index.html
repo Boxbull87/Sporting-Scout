@@ -1570,6 +1570,7 @@ function guardar(){
     db.transaction('proyectos','readwrite').objectStore('proyectos').put(datos, estado.partido.id);
     guardarConfigLocal();
   }catch(e){}
+  programarSubidaProyecto();
 }
 // Solo la parte de 'config' (paneles + qué proyecto es el último abierto). Aparte
 // de guardar(), se llama sola cada vez que se edita un panel/categoría.
@@ -1658,6 +1659,7 @@ function migrarProyectoLegado(){
 }
 
 function aplicarProyecto(id,datos){
+  flushSubidaProyecto(); // no perder el último tramo del proyecto que se abandona
   estado.partido=datos.partido || estado.partido;
   estado.partido.id=id;
   if(!estado.partido.tFin) estado.partido.tFin={1:null,2:null}; // proyectos guardados antes de que existiera
@@ -1760,6 +1762,7 @@ async function reconectarVideoDesdeForm(){
 // mantenerPropia: conserva la plantilla propia actual (tu equipo no cambia
 // de partido a partido); la rival siempre se vacía porque cambia cada vez.
 function nuevoProyecto(mantenerPropia){
+  flushSubidaProyecto(); // no perder el último tramo del proyecto que se abandona
   const propiaActual=estado.plantillaPropia;
   estado.partido={
     id:'p_'+Date.now(), vinculado:false, partidoSportingId:null,
@@ -2006,6 +2009,97 @@ function borrarPanelEnFirestore(id){
 }
 
 /* =====================================================================
+   PROYECTOS (Firestore)
+   Mismo patrón que los paneles de arriba: cada partido es un documento en
+   proyectos_scouting, propiedad de un coachUid, y se sube solo a la nube sin
+   botón aparte. IndexedDB sigue siendo la copia principal e instantánea —
+   marcar eventos nunca espera a la red. Unos segundos después de cada
+   guardar() (para no machacar Firestore mientras marcas rápido) se programa
+   una subida en segundo plano; si falla por no haber conexión no se pierde
+   nada en local, solo avisa con un toast y se reintenta en el siguiente
+   guardado. El vídeo (videoHandle) no viaja aquí, igual que en exportarJSON.
+   ===================================================================== */
+let subidaProyectoPendiente=null;
+function programarSubidaProyecto(){
+  if(!sporting.uid) return;
+  clearTimeout(subidaProyectoPendiente);
+  subidaProyectoPendiente=setTimeout(subirProyectoActualAFirestore, 4000);
+}
+function subirProyectoActualAFirestore(){
+  if(!sporting.uid) return Promise.resolve();
+  const partidoSubir={...estado.partido};
+  delete partidoSubir.videoHandle;
+  const datos={
+    coachUid: sporting.uid, partido: partidoSubir,
+    plantillaPropia: estado.plantillaPropia, plantillaRival: estado.plantillaRival,
+    eventos: estado.eventos, enPista: estado.enPista,
+    cambiosQuinteto: estado.cambiosQuinteto, pausas: estado.pausas,
+    actualizado: firebase.firestore.FieldValue.serverTimestamp()
+  };
+  return sportingDb.collection('proyectos_scouting').doc(estado.partido.id).set(datos, {merge:true}).catch(err=>{
+    toast('No se pudo sincronizar el partido con la nube (¿sin conexión?): '+err.message);
+  });
+}
+// Envía ya mismo (sin esperar el temporizador) lo que hubiera pendiente del
+// proyecto que se está a punto de abandonar — se llama justo antes de cambiar
+// estado.partido a otro proyecto (ver nuevoProyecto/aplicarProyecto), para no
+// perder el último tramo de marcaje por culpa del debounce si cambias rápido.
+function flushSubidaProyecto(){
+  if(!sporting.uid || !estado.partido || !estado.partido.id) return;
+  clearTimeout(subidaProyectoPendiente);
+  subirProyectoActualAFirestore();
+}
+async function cargarProyectosDesdeFirestore(){
+  if(!sporting.uid) return [];
+  const snap = await sportingDb.collection('proyectos_scouting').where('coachUid','==',sporting.uid).get();
+  return snap.docs.map(d=>{
+    const datos=d.data();
+    const actualizado = datos.actualizado && datos.actualizado.toDate? datos.actualizado.toDate().toISOString() : null;
+    return {...datos, id:d.id, actualizado};
+  });
+}
+function borrarProyectoEnFirestore(id){
+  if(!sporting.uid) return Promise.resolve();
+  return sportingDb.collection('proyectos_scouting').doc(id).delete().catch(err=>{
+    toast('No se pudo borrar el partido de la nube (¿sin conexión?): '+err.message);
+  });
+}
+// Junta los proyectos locales (IndexedDB) con los de la nube (Firestore), sin
+// duplicar: si un proyecto está en los dos sitios se queda con los datos más
+// recientes (por fecha de actualizado) para mostrar en la lista, marcado con
+// nube:true para el icono ☁. Si falla la lectura de Firestore (sin conexión),
+// simplemente se muestran solo los locales, como antes de que existiera esto.
+async function listarProyectosCombinados(){
+  const locales = await listarProyectos();
+  let nube = [];
+  try{ nube = await cargarProyectosDesdeFirestore(); }catch(e){ /* sin red: solo locales */ }
+  const porId = new Map();
+  locales.forEach(p=>porId.set(p.id, {...p, nube:false}));
+  nube.forEach(p=>{
+    const existente = porId.get(p.id);
+    if(!existente){ porId.set(p.id, {...p, nube:true}); return; }
+    const tLocal = existente.actualizado? new Date(existente.actualizado).getTime() : 0;
+    const tNube = p.actualizado? new Date(p.actualizado).getTime() : 0;
+    porId.set(p.id, {...(tNube>tLocal? p : existente), nube:true});
+  });
+  return Array.from(porId.values());
+}
+// Abre un proyecto por id: primero mira en local, y si no está ahí (p.ej. lo
+// marcaste en otro navegador) lo baja de Firestore. aplicarProyecto()+guardar()
+// ya se encargan de dejarlo también en local a partir de ahora.
+async function cargarProyectoConNube(id){
+  const local = await cargarProyecto(id);
+  if(local) return local;
+  if(!sporting.uid) return null;
+  try{
+    const doc = await sportingDb.collection('proyectos_scouting').doc(id).get();
+    if(!doc.exists) return null;
+    const {coachUid, actualizado, ...resto} = doc.data();
+    return resto;
+  }catch(e){ return null; }
+}
+
+/* =====================================================================
    MODALES
    ===================================================================== */
 
@@ -2036,7 +2130,8 @@ function filaProyectoRow(p, activoId, modoInicio){
     : `<button class="btn" style="padding:2px 8px" onclick="${modoInicio?'entrarProyectoExistente':'abrirProyectoDesdeForm'}('${p.id}')">Abrir</button>`;
   const accionBorrar = `<button class="btn" style="padding:2px 8px" onclick="${modoInicio?'borrarProyectoDesdeInicio':'borrarProyectoDesdeForm'}('${p.id}')" ${activo?'disabled':''}>Borrar</button>`;
   return `<tr${activo?' style="background:var(--panel-2)"':''}>
-    <td>${rival}${futuro?' <span class="pill" style="background:#E0A32E22;color:#E0A32E">futuro</span>':''}</td>
+    <td>${rival}${futuro?' <span class="pill" style="background:#E0A32E22;color:#E0A32E">futuro</span>':''}${
+      p.nube? ' <span title="Sincronizado con la nube">☁</span>':''}</td>
     <td class="tc">${fecha}</td>
     <td class="tc">${(p.eventos||[]).length}</td>
     <td class="tc" style="color:var(--muted)">${p.actualizado? new Date(p.actualizado).toLocaleString():'—'}</td>
@@ -2044,7 +2139,7 @@ function filaProyectoRow(p, activoId, modoInicio){
 }
 
 async function abrirProyectos(){
-  const lista = await listarProyectos();
+  const lista = await listarProyectosCombinados();
   lista.sort((a,b)=> new Date(b.actualizado||0) - new Date(a.actualizado||0));
   const filas = lista.map(p=>filaProyectoRow(p, estado.partido.id, false)).join('');
 
@@ -2063,7 +2158,7 @@ async function abrirProyectos(){
 // Pantalla de inicio: misma lista que el modal "Proyectos" de arriba, pero a
 // pantalla completa y sin proyecto "activo" todavía (se elige aquí antes de entrar).
 async function renderPantallaInicio(){
-  const lista = await listarProyectos();
+  const lista = await listarProyectosCombinados();
   lista.sort((a,b)=> new Date(b.actualizado||0) - new Date(a.actualizado||0));
   const filas = lista.map(p=>filaProyectoRow(p, null, true)).join('');
   document.getElementById('inicioLista').innerHTML = lista.length
@@ -2086,7 +2181,7 @@ function entrarNuevoProyecto(){
   toast('Proyecto nuevo creado.');
 }
 async function entrarProyectoExistente(id){
-  const p = await cargarProyecto(id);
+  const p = await cargarProyectoConNube(id);
   if(!p){ toast('No se pudo abrir ese proyecto.'); return; }
   aplicarProyecto(id, p);
   guardar();
@@ -2102,6 +2197,7 @@ async function entrarProyectoExistente(id){
 async function borrarProyectoDesdeInicio(id){
   if(!confirm('¿Borrar este proyecto? Esta acción no se puede deshacer.')) return;
   await borrarProyectoDB(id);
+  await borrarProyectoEnFirestore(id);
   toast('Proyecto borrado.');
   renderPantallaInicio();
 }
@@ -2118,7 +2214,7 @@ function nuevoProyectoDesdeForm(){
   toast('Proyecto nuevo creado.');
 }
 async function abrirProyectoDesdeForm(id){
-  const p = await cargarProyecto(id);
+  const p = await cargarProyectoConNube(id);
   if(!p){ toast('No se pudo abrir ese proyecto.'); return; }
   aplicarProyecto(id, p);
   guardar();
@@ -2132,6 +2228,7 @@ async function abrirProyectoDesdeForm(id){
 async function borrarProyectoDesdeForm(id){
   if(!confirm('¿Borrar este proyecto? Esta acción no se puede deshacer.')) return;
   await borrarProyectoDB(id);
+  await borrarProyectoEnFirestore(id);
   toast('Proyecto borrado.');
   abrirProyectos();
 }
