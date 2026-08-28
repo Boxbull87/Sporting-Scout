@@ -155,6 +155,17 @@ input:focus,select:focus,button:focus-visible{outline:2px solid var(--rojo);outl
 .dcolor.on{border-color:#fff}
 .dchip.on{background:var(--ok);border-color:var(--ok);color:#08130E}
 
+/* ---------- RESUMEN (ver una selección de eventos seguidos) ---------- */
+.resumen-barra{
+  position:absolute;bottom:8px;left:8px;right:8px;z-index:17;
+  background:rgba(14,16,19,.9);border:1px solid var(--line);border-radius:8px;
+  padding:7px 10px;display:flex;align-items:center;gap:6px;flex-wrap:wrap;
+}
+/* En pantalla completa, video-zona pasa a ocupar toda la pantalla: sin esto el
+   vídeo se queda con su tamaño normal metido en una esquina del hueco negro. */
+.video-zona:fullscreen{width:100vw;height:100vh}
+.video-zona:-webkit-full-screen{width:100vw;height:100vh}
+
 /* pantalla de carga de fuente */
 .fuente{
   position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;
@@ -482,6 +493,15 @@ input:focus,select:focus,button:focus-visible{outline:2px solid var(--rojo);outl
           </div>
         </div>
       </div>
+      <div class="resumen-barra hidden" id="resumenBarra">
+        <span id="resumenInfo" style="font-size:12px;white-space:nowrap"></span>
+        <span style="flex:1"></span>
+        <button class="btn" id="btnResumenAnterior" style="padding:4px 9px" title="Evento anterior">⏮</button>
+        <button class="btn" id="btnResumenPausa" style="padding:4px 9px" title="Pausar / reanudar">⏸</button>
+        <button class="btn" id="btnResumenSiguiente" style="padding:4px 9px" title="Siguiente evento">⏭</button>
+        <button class="btn" id="btnResumenFullscreen" style="padding:4px 9px" title="Pantalla completa">⛶</button>
+        <button class="btn" id="btnResumenSalir" style="padding:4px 9px">✕ Salir</button>
+      </div>
       <div class="fuente" id="fuente">
         <h2>Carga el partido</h2>
         <p>Trabaja con un archivo local si vas a exportar clips, o con YouTube si solo vas a marcar estadísticas.</p>
@@ -523,6 +543,7 @@ input:focus,select:focus,button:focus-visible{outline:2px solid var(--rojo);outl
         <option value="4" selected>4 px/s</option><option value="8">8 px/s</option>
         <option value="16">16 px/s</option>
       </select>
+      <button class="tbtn" id="btnFullscreen" title="Pantalla completa">⛶</button>
       <span style="flex:1"></span>
       <span id="estadoFuente" style="color:var(--muted);font-size:11px"></span>
     </div>
@@ -1158,6 +1179,139 @@ function soltarTrazoDibujo(){
   dibujoEstado.trazos.push(dibujoEstado.arrastrando);
   dibujoEstado.arrastrando=null;
   pintarCanvasDibujo();
+}
+
+/* =====================================================================
+   RESUMEN (ver una selección de eventos, de cualquier categoría, seguidos)
+   Se eligen desde la lista de Eventos (mismas casillas que usa la
+   exportación de clips). Se reproducen en orden cronológico, uno detrás de
+   otro: al llegar al final de uno salta sola al siguiente. Si algún evento
+   tiene momentos dibujados dentro de su rango, se ven igual que al exportar
+   (el vídeo se congela con el trazo encima el tiempo configurado) — se
+   reutiliza el mismo #dibujoCanvas del modo dibujo, aquí solo para mostrar,
+   sin herramientas. Funciona con vídeo local o YouTube (solo para ver: la
+   exportación como un único vídeo, aparte, sigue necesitando local).
+   ===================================================================== */
+let resumenEstado=null; // {eventos:[...ordenados], indice}
+let watcherResumen=null;
+
+function limpiarWatcherResumen(){ if(watcherResumen){ clearInterval(watcherResumen); watcherResumen=null; } }
+
+function mostrarOverlayDibujoResumen(trazos){
+  const cv=document.getElementById('dibujoCanvas');
+  const r=rectVideoRenderizado();
+  cv.style.left=r.left+'px'; cv.style.top=r.top+'px';
+  cv.style.width=r.width+'px'; cv.style.height=r.height+'px';
+  cv.width=Math.max(1,Math.round(r.width));
+  cv.height=Math.max(1,Math.round(r.height));
+  cv.classList.remove('hidden');
+  const ctx=cv.getContext('2d');
+  ctx.clearRect(0,0,cv.width,cv.height);
+  trazos.forEach(t=>dibujarTrazoDibujo(ctx,cv,t));
+}
+function ocultarOverlayDibujoResumen(){ document.getElementById('dibujoCanvas').classList.add('hidden'); }
+
+// Reproduce un tramo [tIni,tFin] congelándose en cada momento dibujado que
+// caiga dentro, y al llegar al final llama a alTerminar(). No depende de si
+// el vídeo está reproduciéndose en cada instante (si el usuario pausa a mano
+// un momento, simplemente espera sin avanzar hasta que reanude él mismo).
+function reproducirConMomentos(tIni, tFin, momentos, alTerminar){
+  limpiarWatcherResumen();
+  Reproductor.ir(tIni);
+  Reproductor.play();
+  const pendientes=momentos.slice();
+  let enCongelado=false;
+  watcherResumen=setInterval(()=>{
+    if(!resumenEstado || enCongelado) return;
+    if(pendientes.length && Reproductor.tiempo()>=pendientes[0].t){
+      const m=pendientes.shift();
+      enCongelado=true;
+      Reproductor.pausa();
+      mostrarOverlayDibujoResumen(m.trazos);
+      setTimeout(()=>{
+        ocultarOverlayDibujoResumen();
+        enCongelado=false;
+        if(!resumenEstado) return;
+        if(Reproductor.tiempo()>=tFin){ limpiarWatcherResumen(); alTerminar(); return; }
+        Reproductor.play();
+      }, Math.max(200, (m.duracion||2.5)*1000));
+      return;
+    }
+    if(Reproductor.tiempo()>=tFin){ limpiarWatcherResumen(); alTerminar(); }
+  }, 120);
+}
+function actualizarInfoResumen(){
+  if(!resumenEstado) return;
+  const ev=resumenEstado.eventos[resumenEstado.indice];
+  const cat=todasLasCategorias().find(c=>c.id===ev.tipo);
+  document.getElementById('resumenInfo').textContent =
+    'Evento '+(resumenEstado.indice+1)+' de '+resumenEstado.eventos.length+' · '+
+    (cat?cat.nom:ev.tipo)+' · '+(ev.equipo==='propio'?'Propio':'Rival')+' · '+tc(ev.t_mark);
+  document.getElementById('btnResumenAnterior').disabled = resumenEstado.indice===0;
+}
+function reproducirEventoResumen(indice){
+  if(!resumenEstado) return;
+  if(indice<0) indice=0;
+  if(indice>=resumenEstado.eventos.length){
+    pausarResumen();
+    document.getElementById('resumenInfo').textContent =
+      'Resumen terminado · '+resumenEstado.eventos.length+' eventos';
+    return;
+  }
+  resumenEstado.indice=indice;
+  actualizarInfoResumen();
+  const ev=resumenEstado.eventos[indice];
+  const momentos=(ev.dibujos||[]).filter(m=>m.t>=ev.t_in && m.t<=ev.t_out).sort((a,b)=>a.t-b.t);
+  reproducirConMomentos(ev.t_in, ev.t_out, momentos, ()=>reproducirEventoResumen(indice+1));
+}
+function iniciarResumen(ids){
+  const eventos = estado.eventos.filter(e=>ids.includes(e.id)).sort((a,b)=>a.t_in-b.t_in);
+  if(!eventos.length){ toast('No hay eventos seleccionados.'); return; }
+  if(dibujoEstado) cerrarModoDibujo();
+  cerrarModal();
+  resumenEstado={eventos, indice:0};
+  document.getElementById('resumenBarra').classList.remove('hidden');
+  document.getElementById('btnResumenPausa').textContent='⏸';
+  reproducirEventoResumen(0);
+}
+function pausarResumen(){
+  limpiarWatcherResumen();
+  ocultarOverlayDibujoResumen();
+  Reproductor.pausa();
+  document.getElementById('btnResumenPausa').textContent='▶';
+}
+function alternarPausaResumen(){
+  if(!resumenEstado) return;
+  if(Reproductor.reproduciendo()){
+    Reproductor.pausa();
+    document.getElementById('btnResumenPausa').textContent='▶';
+  }else{
+    Reproductor.play();
+    document.getElementById('btnResumenPausa').textContent='⏸';
+  }
+}
+function siguienteEventoResumen(){ if(resumenEstado) reproducirEventoResumen(resumenEstado.indice+1); }
+function anteriorEventoResumen(){ if(resumenEstado) reproducirEventoResumen(resumenEstado.indice-1); }
+function salirResumen(){
+  limpiarWatcherResumen();
+  ocultarOverlayDibujoResumen();
+  Reproductor.pausa();
+  resumenEstado=null;
+  document.getElementById('resumenBarra').classList.add('hidden');
+  if(document.fullscreenElement) alternarPantallaCompleta();
+}
+
+// Pantalla completa sobre el propio recuadro del vídeo (funciona igual dentro
+// o fuera del modo resumen). Usa prefijos porque Safari aún necesita webkit.
+function alternarPantallaCompleta(){
+  const zona=document.getElementById('videoZona');
+  const salirFn=document.exitFullscreen || document.webkitExitFullscreen;
+  const entrarFn=zona.requestFullscreen || zona.webkitRequestFullscreen;
+  if(document.fullscreenElement || document.webkitFullscreenElement){
+    if(salirFn) salirFn.call(document);
+  }else if(entrarFn){
+    entrarFn.call(zona).catch(()=>toast('No se pudo poner en pantalla completa.'));
+  }
 }
 
 // corte: true = además de estadística, este evento en concreto genera clip exportable
@@ -2428,12 +2582,16 @@ function abrirEventos(){
   const eventosVisibles = filtroSoloClip
     ? estado.eventos.filter(ev=>eventoGeneraClip(ev))
     : estado.eventos;
+  const catsPresentes = Array.from(new Map(eventosVisibles.map(ev=>{
+    const c=todasLasCategorias().find(c=>c.id===ev.tipo) || {id:ev.tipo, nom:ev.tipo};
+    return [c.id, c];
+  })).values());
   const filas = eventosVisibles.map(ev=>{
     const cat=todasLasCategorias().find(c=>c.id===ev.tipo) || {nom:ev.tipo,color:'#7E8CA0'};
     const puedeClip = esLocal && eventoGeneraClip(ev);
     const tituloSinClip = eventoGeneraClip(ev)? '' : 'title="'+motivoSinClip(ev)+'"';
     return `<tr>
-      <td><input type="checkbox" class="chk-export" data-id="${ev.id}" ${puedeClip?'checked':'disabled'}></td>
+      <td><input type="checkbox" class="chk-export" data-id="${ev.id}" data-tipo="${ev.tipo}" ${puedeClip?'checked':''}></td>
       <td class="tc">${tc(ev.t_mark)}</td>
       <td><span class="pill" style="background:${cat.color}22;color:${cat.color}">${cat.nom}</span></td>
       <td>${ev.equipo==='propio'?'Propio':'Rival'}</td>
@@ -2481,8 +2639,20 @@ function abrirEventos(){
         encontrar rápido los que sí quieres exportar entre muchos marcados.</span>
     </div>` : ''}
     <div class="fila-form" style="margin-bottom:6px">
-      <button class="btn" onclick="marcarTodosExport(true)" ${esLocal?'':'disabled'}>Marcar todos</button>
-      <button class="btn" onclick="marcarTodosExport(false)" ${esLocal?'':'disabled'}>Marcar ninguno</button>
+      <button class="btn" onclick="marcarTodosExport(true)">Marcar todos</button>
+      <button class="btn" onclick="marcarTodosExport(false)">Marcar ninguno</button>
+      <select id="selectCatMarcar" style="max-width:160px">
+        <option value="">Por categoría…</option>
+        ${catsPresentes.map(c=>`<option value="${c.id}">${c.nom}</option>`).join('')}
+      </select>
+      <button class="btn" onclick="marcarPorCategoria(document.getElementById('selectCatMarcar').value, true)">+ Añadir</button>
+      <button class="btn" onclick="marcarPorCategoria(document.getElementById('selectCatMarcar').value, false)">− Quitar</button>
+    </div>
+    <div class="fila-form" style="margin-bottom:6px">
+      <button class="btn btn-rojo" onclick="verSeleccionSeguidos()">▶ Ver seguidos</button>
+      <span style="color:var(--muted);font-size:11px;max-width:280px">
+        Reproduce los eventos marcados arriba uno detrás de otro, en orden cronológico
+        (con sus dibujos si tienen). Funciona con vídeo local o YouTube.</span>
     </div>
     <div class="fila-form" style="margin-bottom:6px">
       <button class="btn btn-rojo" onclick="descargarClipsDirecto()" ${esLocal?'':'disabled'}>Descargar clips seleccionados</button>
@@ -2553,7 +2723,19 @@ function borrarEvento(id){
   guardar(); pintarTimeline(); abrirEventos();
 }
 function marcarTodosExport(valor){
-  document.querySelectorAll('.chk-export').forEach(c=>{ if(!c.disabled) c.checked=valor; });
+  document.querySelectorAll('.chk-export').forEach(c=>{ c.checked=valor; });
+}
+function verSeleccionSeguidos(){
+  const ids=Array.from(document.querySelectorAll('.chk-export:checked')).map(c=>c.dataset.id);
+  if(!ids.length){ toast('No has marcado ningún evento.'); return; }
+  iniciarResumen(ids);
+}
+// Marca/desmarca de golpe todos los eventos de una categoría, sin tocar el resto
+// de la selección — así se pueden combinar varias categorías o ajustar a mano
+// encima (quitar/añadir sueltos) sin perder lo que ya tenías marcado.
+function marcarPorCategoria(catId, marcar){
+  if(!catId) return;
+  document.querySelectorAll('.chk-export').forEach(c=>{ if(c.dataset.tipo===catId) c.checked=marcar; });
 }
 
 /* =====================================================================
@@ -3902,6 +4084,14 @@ dibujoCanvasEl.addEventListener('pointermove', moverTrazoDibujo);
 dibujoCanvasEl.addEventListener('pointerup', soltarTrazoDibujo);
 dibujoCanvasEl.addEventListener('pointercancel', soltarTrazoDibujo);
 
+// resumen (ver eventos seleccionados seguidos) y pantalla completa
+document.getElementById('btnResumenAnterior').onclick=anteriorEventoResumen;
+document.getElementById('btnResumenSiguiente').onclick=siguienteEventoResumen;
+document.getElementById('btnResumenPausa').onclick=alternarPausaResumen;
+document.getElementById('btnResumenFullscreen').onclick=alternarPantallaCompleta;
+document.getElementById('btnResumenSalir').onclick=salirResumen;
+document.getElementById('btnFullscreen').onclick=alternarPantallaCompleta;
+
 // Plegar/desplegar la línea de tiempo: da más sitio al vídeo y al panel de marcaje
 // cuando no la necesitas encima. No se persiste entre sesiones (como el zoom).
 document.getElementById('btnPlegarTl').onclick=()=>{
@@ -4169,6 +4359,13 @@ document.addEventListener('keydown',e=>{
   if(document.getElementById('modalExport').classList.contains('abierto')) return;
   if(document.getElementById('ubicacionModal').classList.contains('abierto')){
     if(e.key==='Escape') cerrarUbicacionCampo(null);
+    return;
+  }
+  if(resumenEstado){
+    if(e.key==='Escape'){ salirResumen(); return; }
+    if(e.key===' '){ e.preventDefault(); alternarPausaResumen(); return; }
+    if(e.key==='ArrowRight'){ e.preventDefault(); siguienteEventoResumen(); return; }
+    if(e.key==='ArrowLeft'){ e.preventDefault(); anteriorEventoResumen(); return; }
     return;
   }
   if(dibujoEstado){
