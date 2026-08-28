@@ -133,6 +133,22 @@ input:focus,select:focus,button:focus-visible{outline:2px solid var(--rojo);outl
 .resize-h{height:6px;flex:none;background:var(--line);cursor:row-resize}
 .resize-h:hover,.resize-h.arrastrando{background:var(--rojo)}
 
+/* ---------- MODO DIBUJO (telestrator sobre el vídeo pausado, solo local) ---------- */
+#dibujoCanvas{position:absolute;z-index:15;cursor:crosshair;touch-action:none}
+.dibujo-barra{
+  position:absolute;top:8px;left:8px;right:8px;z-index:16;
+  background:rgba(14,16,19,.94);border:1px solid var(--line);border-radius:8px;
+  padding:8px 10px;display:flex;flex-direction:column;gap:7px;
+}
+.dibujo-fila{display:flex;align-items:center;gap:6px;flex-wrap:wrap}
+.dtool{width:30px;height:30px;flex:none;border:1px solid var(--line);border-radius:6px;
+  background:var(--panel-2);font-size:15px;line-height:1}
+.dtool:hover{background:#252A33}
+.dtool.on{background:var(--rojo);border-color:var(--rojo)}
+.dcolor{width:20px;height:20px;flex:none;border-radius:50%;border:2px solid var(--line);padding:0}
+.dcolor.on{border-color:#fff}
+.dchip.on{background:var(--ok);border-color:var(--ok);color:#08130E}
+
 /* pantalla de carga de fuente */
 .fuente{
   position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;
@@ -423,6 +439,35 @@ input:focus,select:focus,button:focus-visible{outline:2px solid var(--rojo);outl
     <div class="video-zona" id="videoZona">
       <video id="vidLocal" playsinline></video>
       <div id="ytHost"></div>
+      <canvas id="dibujoCanvas" class="hidden"></canvas>
+      <div class="dibujo-barra hidden" id="dibujoBarra">
+        <div class="dibujo-fila">
+          <button class="dtool on" data-tool="lapiz" title="Lápiz">✏️</button>
+          <button class="dtool" data-tool="flecha" title="Flecha">↗️</button>
+          <button class="dtool" data-tool="linea" title="Línea">╱</button>
+          <button class="dtool" data-tool="circulo" title="Círculo">⭕</button>
+          <button class="dtool" data-tool="rectangulo" title="Rectángulo">▭</button>
+          <button class="dtool" data-tool="texto" title="Texto">🔤</button>
+          <span style="flex:none;width:1px;height:20px;background:var(--line);margin:0 4px"></span>
+          <button class="dcolor on" data-color="#D8232A" style="background:#D8232A" title="Rojo"></button>
+          <button class="dcolor" data-color="#3FB27F" style="background:#3FB27F" title="Verde"></button>
+          <button class="dcolor" data-color="#2E6FB7" style="background:#2E6FB7" title="Azul"></button>
+          <button class="dcolor" data-color="#E0A32E" style="background:#E0A32E" title="Amarillo"></button>
+          <button class="dcolor" data-color="#FFFFFF" style="background:#FFFFFF" title="Blanco"></button>
+          <span style="flex:none;width:1px;height:20px;background:var(--line);margin:0 4px"></span>
+          <button class="btn" id="btnDibujoGrosor" style="padding:4px 8px" title="Grosor del trazo">Fino</button>
+          <button class="btn" id="btnDibujoDeshacer" style="padding:4px 8px">↩ Deshacer</button>
+          <button class="btn" id="btnDibujoBorrar" style="padding:4px 8px">🗑 Borrar todo</button>
+        </div>
+        <div class="dibujo-fila" id="dibujoMomentos"></div>
+        <div class="dibujo-fila">
+          <span id="dibujoInfo" style="color:var(--muted);font-size:11px"></span>
+          <span style="flex:1"></span>
+          <button class="btn" id="btnDibujoBorrarMomento" style="padding:4px 8px;display:none">🗑 Borrar momento</button>
+          <button class="btn btn-rojo" id="btnDibujoGuardar" style="padding:4px 8px">💾 Guardar momento</button>
+          <button class="btn" id="btnDibujoCerrar" style="padding:4px 8px">Cerrar</button>
+        </div>
+      </div>
       <div class="fuente" id="fuente">
         <h2>Carga el partido</h2>
         <p>Trabaja con un archivo local si vas a exportar clips, o con YouTube si solo vas a marcar estadísticas.</p>
@@ -847,6 +892,7 @@ function nuevoEvento(cat,t_in,t_out,t_mark,corte){
     nota: '',
     punto: null,                  // {x,y} normalizados 0..1, solo si la categoría marca ubicación
     corte: !!corte,               // true = este evento en concreto genera clip exportable (además de estadística)
+    dibujos: [],                  // momentos dibujados a mano sobre el vídeo (ver MODO DIBUJO), solo vídeo local
     creado: new Date().toISOString()
   };
 }
@@ -892,6 +938,210 @@ function cerrarUbicacionCampo(punto){
   ubicacionPendiente = null;
   if(reanudar) Reproductor.play();
   if(alTerminar) alTerminar();
+}
+
+/* =====================================================================
+   MODO DIBUJO (telestrator)
+   Dibujar a mano sobre el vídeo pausado, como en apps de análisis. Solo vídeo
+   local (con YouTube no hay fotogramas reales que capturar al exportar, ver
+   MODO DIBUJO · EXPORTACIÓN más abajo). Cada evento puede tener varios
+   "momentos" dibujados (ev.dibujos: [{t, duracion, trazos:[...]}]), cada uno
+   en un instante propio del clip. Los trazos se guardan en coordenadas
+   normalizadas 0..1 relativas al recuadro donde se ve realmente el vídeo
+   (sin las bandas negras de object-fit:contain), igual que ev.punto en
+   "ubicación en el campo".
+   ===================================================================== */
+let dibujoEstado = null; // {evId, herramienta, color, grosor, trazos:[...], momentoIdx, arrastrando}
+
+function rectVideoRenderizado(){
+  const v=document.getElementById('vidLocal');
+  const zona=document.getElementById('videoZona');
+  const zw=zona.clientWidth, zh=zona.clientHeight;
+  const vw=v.videoWidth||zw, vh=v.videoHeight||zh;
+  if(!vw||!vh||!zw||!zh) return {left:0, top:0, width:zw, height:zh};
+  const escala=Math.min(zw/vw, zh/vh);
+  const width=vw*escala, height=vh*escala;
+  return {left:(zw-width)/2, top:(zh-height)/2, width, height};
+}
+function posicionarCanvasDibujo(){
+  if(!dibujoEstado) return;
+  const cv=document.getElementById('dibujoCanvas');
+  const r=rectVideoRenderizado();
+  cv.style.left=r.left+'px'; cv.style.top=r.top+'px';
+  cv.style.width=r.width+'px'; cv.style.height=r.height+'px';
+  cv.width=Math.max(1,Math.round(r.width));
+  cv.height=Math.max(1,Math.round(r.height));
+  pintarCanvasDibujo();
+}
+
+function abrirModoDibujo(evId){
+  if(Reproductor.tipo!=='local'){ toast('Dibujar solo funciona con vídeo local.'); return; }
+  const ev=estado.eventos.find(e=>e.id===evId);
+  if(!ev) return;
+  cerrarModal();
+  Reproductor.pausa();
+  if(Reproductor.tiempo()<ev.t_in-0.05 || Reproductor.tiempo()>ev.t_out+0.05) Reproductor.ir(ev.t_mark);
+  if(!ev.dibujos) ev.dibujos=[];
+  dibujoEstado={evId, herramienta:'lapiz', color:'#D8232A', grosor:3, trazos:[], momentoIdx:null};
+  document.getElementById('dibujoCanvas').classList.remove('hidden');
+  document.getElementById('dibujoBarra').classList.remove('hidden');
+  window.addEventListener('resize', posicionarCanvasDibujo);
+  posicionarCanvasDibujo();
+  pintarChipsMomentosDibujo();
+  actualizarInfoDibujo();
+}
+function cerrarModoDibujo(){
+  if(!dibujoEstado) return;
+  document.getElementById('dibujoCanvas').classList.add('hidden');
+  document.getElementById('dibujoBarra').classList.add('hidden');
+  window.removeEventListener('resize', posicionarCanvasDibujo);
+  dibujoEstado=null;
+}
+function eventoDibujoActual(){
+  return dibujoEstado? estado.eventos.find(e=>e.id===dibujoEstado.evId) : null;
+}
+function actualizarInfoDibujo(){
+  const ev=eventoDibujoActual();
+  if(!ev) return;
+  const cat=todasLasCategorias().find(c=>c.id===ev.tipo);
+  const editando = dibujoEstado.momentoIdx!=null;
+  document.getElementById('dibujoInfo').textContent =
+    (cat?cat.nom:ev.tipo)+' · '+tc(Reproductor.tiempo())+(editando? ' · editando momento guardado':' · momento nuevo');
+  document.getElementById('btnDibujoBorrarMomento').style.display = editando? 'inline-block':'none';
+}
+function pintarChipsMomentosDibujo(){
+  const ev=eventoDibujoActual();
+  if(!ev) return;
+  const cont=document.getElementById('dibujoMomentos');
+  const chips=(ev.dibujos||[]).map((m,i)=>
+    `<button class="btn dchip${dibujoEstado.momentoIdx===i?' on':''}" style="padding:2px 8px" onclick="irAMomentoDibujo(${i})">${tc(m.t)}</button>`
+  ).join('');
+  cont.innerHTML = (chips? '<span style="color:var(--muted);font-size:11px">Momentos:</span>'+chips : '')+
+    '<button class="btn" style="padding:2px 8px" onclick="nuevoMomentoDibujo()">+ Nuevo momento aquí</button>';
+}
+function irAMomentoDibujo(i){
+  const ev=eventoDibujoActual();
+  const m=ev && ev.dibujos[i];
+  if(!m) return;
+  Reproductor.pausa();
+  Reproductor.ir(m.t);
+  dibujoEstado.momentoIdx=i;
+  dibujoEstado.trazos=m.trazos.map(t=>({...t}));
+  pintarChipsMomentosDibujo();
+  actualizarInfoDibujo();
+  pintarCanvasDibujo();
+}
+function nuevoMomentoDibujo(){
+  if(!dibujoEstado) return;
+  dibujoEstado.momentoIdx=null;
+  dibujoEstado.trazos=[];
+  pintarChipsMomentosDibujo();
+  actualizarInfoDibujo();
+  pintarCanvasDibujo();
+}
+function guardarMomentoDibujo(){
+  const ev=eventoDibujoActual();
+  if(!ev) return;
+  if(!dibujoEstado.trazos.length){ toast('No has dibujado nada todavía.'); return; }
+  if(!ev.dibujos) ev.dibujos=[];
+  const momento={t:Reproductor.tiempo(), duracion:2.5, trazos:dibujoEstado.trazos.map(t=>({...t}))};
+  if(dibujoEstado.momentoIdx!=null && ev.dibujos[dibujoEstado.momentoIdx]){
+    ev.dibujos[dibujoEstado.momentoIdx]=momento;
+  }else{
+    ev.dibujos.push(momento);
+    ev.dibujos.sort((a,b)=>a.t-b.t);
+    dibujoEstado.momentoIdx=ev.dibujos.indexOf(momento);
+  }
+  guardar();
+  pintarChipsMomentosDibujo();
+  actualizarInfoDibujo();
+  toast('Momento guardado.');
+}
+function borrarMomentoDibujo(){
+  const ev=eventoDibujoActual();
+  if(!ev || dibujoEstado.momentoIdx==null) return;
+  if(!confirm('¿Borrar este momento dibujado?')) return;
+  ev.dibujos.splice(dibujoEstado.momentoIdx,1);
+  guardar();
+  nuevoMomentoDibujo();
+  toast('Momento borrado.');
+}
+
+// ---- lienzo: pintado y herramientas ----
+function puntoCanvasDibujo(e,cv){
+  const r=cv.getBoundingClientRect();
+  return {x:Math.min(1,Math.max(0,(e.clientX-r.left)/r.width)), y:Math.min(1,Math.max(0,(e.clientY-r.top)/r.height))};
+}
+function pintarCanvasDibujo(){
+  if(!dibujoEstado) return;
+  const cv=document.getElementById('dibujoCanvas');
+  const ctx=cv.getContext('2d');
+  ctx.clearRect(0,0,cv.width,cv.height);
+  dibujoEstado.trazos.forEach(t=>dibujarTrazoDibujo(ctx,cv,t));
+  if(dibujoEstado.arrastrando) dibujarTrazoDibujo(ctx,cv,dibujoEstado.arrastrando);
+}
+function dibujarTrazoDibujo(ctx,cv,t){
+  const X=v=>v*cv.width, Y=v=>v*cv.height;
+  ctx.strokeStyle=t.color; ctx.fillStyle=t.color; ctx.lineWidth=t.grosor;
+  ctx.lineCap='round'; ctx.lineJoin='round';
+  if(t.tipo==='lapiz'){
+    ctx.beginPath();
+    t.puntos.forEach((p,i)=> i===0? ctx.moveTo(X(p.x),Y(p.y)) : ctx.lineTo(X(p.x),Y(p.y)));
+    ctx.stroke();
+  }else if(t.tipo==='linea'){
+    ctx.beginPath(); ctx.moveTo(X(t.x1),Y(t.y1)); ctx.lineTo(X(t.x2),Y(t.y2)); ctx.stroke();
+  }else if(t.tipo==='flecha'){
+    const x1=X(t.x1),y1=Y(t.y1),x2=X(t.x2),y2=Y(t.y2);
+    ctx.beginPath(); ctx.moveTo(x1,y1); ctx.lineTo(x2,y2); ctx.stroke();
+    const ang=Math.atan2(y2-y1,x2-x1), tam=8+t.grosor*2;
+    ctx.beginPath(); ctx.moveTo(x2,y2);
+    ctx.lineTo(x2-tam*Math.cos(ang-Math.PI/6), y2-tam*Math.sin(ang-Math.PI/6));
+    ctx.lineTo(x2-tam*Math.cos(ang+Math.PI/6), y2-tam*Math.sin(ang+Math.PI/6));
+    ctx.closePath(); ctx.fill();
+  }else if(t.tipo==='circulo'){
+    const cx=(X(t.x1)+X(t.x2))/2, cy=(Y(t.y1)+Y(t.y2))/2;
+    const rx=Math.abs(X(t.x2)-X(t.x1))/2, ry=Math.abs(Y(t.y2)-Y(t.y1))/2;
+    ctx.beginPath(); ctx.ellipse(cx,cy,Math.max(rx,1),Math.max(ry,1),0,0,Math.PI*2); ctx.stroke();
+  }else if(t.tipo==='rectangulo'){
+    ctx.strokeRect(Math.min(X(t.x1),X(t.x2)), Math.min(Y(t.y1),Y(t.y2)),
+      Math.abs(X(t.x2)-X(t.x1)), Math.abs(Y(t.y2)-Y(t.y1)));
+  }else if(t.tipo==='texto'){
+    ctx.font='600 '+(t.tamano||18)+'px Inter, sans-serif';
+    ctx.textBaseline='top';
+    ctx.fillText(t.texto, X(t.x), Y(t.y));
+  }
+}
+function iniciarTrazoDibujo(e){
+  if(!dibujoEstado) return;
+  const cv=document.getElementById('dibujoCanvas');
+  const p=puntoCanvasDibujo(e,cv);
+  if(dibujoEstado.herramienta==='texto'){
+    const texto=prompt('Texto a añadir:');
+    if(texto && texto.trim()){
+      dibujoEstado.trazos.push({tipo:'texto', x:p.x, y:p.y, texto:texto.trim(),
+        color:dibujoEstado.color, tamano:dibujoEstado.grosor>=6?26:18});
+      pintarCanvasDibujo();
+    }
+    return;
+  }
+  try{ cv.setPointerCapture(e.pointerId); }catch(err){ /* ratón/táctil simulado o ya liberado: no pasa nada */ }
+  dibujoEstado.arrastrando = dibujoEstado.herramienta==='lapiz'
+    ? {tipo:'lapiz', puntos:[p], color:dibujoEstado.color, grosor:dibujoEstado.grosor}
+    : {tipo:dibujoEstado.herramienta, x1:p.x, y1:p.y, x2:p.x, y2:p.y, color:dibujoEstado.color, grosor:dibujoEstado.grosor};
+}
+function moverTrazoDibujo(e){
+  if(!dibujoEstado || !dibujoEstado.arrastrando) return;
+  const cv=document.getElementById('dibujoCanvas');
+  const p=puntoCanvasDibujo(e,cv);
+  if(dibujoEstado.arrastrando.tipo==='lapiz') dibujoEstado.arrastrando.puntos.push(p);
+  else{ dibujoEstado.arrastrando.x2=p.x; dibujoEstado.arrastrando.y2=p.y; }
+  pintarCanvasDibujo();
+}
+function soltarTrazoDibujo(){
+  if(!dibujoEstado || !dibujoEstado.arrastrando) return;
+  dibujoEstado.trazos.push(dibujoEstado.arrastrando);
+  dibujoEstado.arrastrando=null;
+  pintarCanvasDibujo();
 }
 
 // corte: true = además de estadística, este evento en concreto genera clip exportable
@@ -2082,6 +2332,9 @@ function abrirEventos(){
       <td class="tc">${cat.ubicacion
         ? `<button class="btn" style="padding:2px 6px" onclick="abrirUbicacionCampo(estado.eventos.find(x=>x.id==='${ev.id}'), todasLasCategorias().find(x=>x.id==='${cat.id}'), abrirEventos)">${ev.punto?'📍':'➕📍'}</button>`
         : '—'}</td>
+      <td class="tc">${esLocal
+        ? `<button class="btn" style="padding:2px 6px" onclick="abrirModoDibujo('${ev.id}')" title="Dibujar a mano sobre el vídeo en este clip">${(ev.dibujos&&ev.dibujos.length)? '✏️ '+ev.dibujos.length : '✏️'}</button>`
+        : `<span style="color:var(--muted);font-size:10px" title="Solo con vídeo local">—</span>`}</td>
       <td class="tc" style="color:var(--muted);white-space:nowrap;font-size:10px">
         <button class="btn" style="padding:0 4px" onclick="ajustarTiempo('${ev.id}','t_in',-1)">−</button>
         ${tc(ev.t_in)}
@@ -2142,7 +2395,7 @@ function abrirEventos(){
         pero necesita FFmpeg instalado y ejecutar el script manualmente.</p>
     </details>
     <div style="overflow-x:auto"><table class="tabla"><thead><tr><th></th><th>Min</th><th>Categoría</th><th>Equipo</th><th>Jugador</th>
-     <th>Resultado</th><th>Corte</th><th>Ubic.</th><th>Clip</th><th></th></tr></thead><tbody>${filas}</tbody></table></div>`);
+     <th>Resultado</th><th>Corte</th><th>Ubic.</th><th>Dibujo</th><th>Clip</th><th></th></tr></thead><tbody>${filas}</tbody></table></div>`);
 }
 function irA(t){ cerrarModal(); Reproductor.ir(t); Reproductor.play(); }
 function toggleCorte(id){
@@ -3384,6 +3637,48 @@ document.getElementById('btnFrameD').onclick=()=>Reproductor.frame(1);
 document.getElementById('velocidad').onchange=e=>Reproductor.velocidad(parseFloat(e.target.value));
 document.getElementById('zoom').onchange=e=>{ estado.pxs=parseInt(e.target.value); pintarTimeline(); };
 
+// modo dibujo (telestrator)
+document.querySelectorAll('.dtool').forEach(b=>{
+  b.onclick=()=>{
+    if(!dibujoEstado) return;
+    dibujoEstado.herramienta=b.dataset.tool;
+    document.querySelectorAll('.dtool').forEach(x=>x.classList.remove('on'));
+    b.classList.add('on');
+  };
+});
+document.querySelectorAll('.dcolor').forEach(b=>{
+  b.onclick=()=>{
+    if(!dibujoEstado) return;
+    dibujoEstado.color=b.dataset.color;
+    document.querySelectorAll('.dcolor').forEach(x=>x.classList.remove('on'));
+    b.classList.add('on');
+  };
+});
+document.getElementById('btnDibujoGrosor').onclick=(e)=>{
+  if(!dibujoEstado) return;
+  dibujoEstado.grosor = dibujoEstado.grosor>=6? 3 : 6;
+  e.target.textContent = dibujoEstado.grosor>=6? 'Grueso':'Fino';
+};
+document.getElementById('btnDibujoDeshacer').onclick=()=>{
+  if(!dibujoEstado || !dibujoEstado.trazos.length) return;
+  dibujoEstado.trazos.pop();
+  pintarCanvasDibujo();
+};
+document.getElementById('btnDibujoBorrar').onclick=()=>{
+  if(!dibujoEstado || !dibujoEstado.trazos.length) return;
+  if(!confirm('¿Borrar todos los trazos de este momento?')) return;
+  dibujoEstado.trazos=[];
+  pintarCanvasDibujo();
+};
+document.getElementById('btnDibujoGuardar').onclick=guardarMomentoDibujo;
+document.getElementById('btnDibujoBorrarMomento').onclick=borrarMomentoDibujo;
+document.getElementById('btnDibujoCerrar').onclick=cerrarModoDibujo;
+const dibujoCanvasEl=document.getElementById('dibujoCanvas');
+dibujoCanvasEl.addEventListener('pointerdown', iniciarTrazoDibujo);
+dibujoCanvasEl.addEventListener('pointermove', moverTrazoDibujo);
+dibujoCanvasEl.addEventListener('pointerup', soltarTrazoDibujo);
+dibujoCanvasEl.addEventListener('pointercancel', soltarTrazoDibujo);
+
 // Plegar/desplegar la línea de tiempo: da más sitio al vídeo y al panel de marcaje
 // cuando no la necesitas encima. No se persiste entre sesiones (como el zoom).
 document.getElementById('btnPlegarTl').onclick=()=>{
@@ -3652,6 +3947,15 @@ document.addEventListener('keydown',e=>{
   if(document.getElementById('ubicacionModal').classList.contains('abierto')){
     if(e.key==='Escape') cerrarUbicacionCampo(null);
     return;
+  }
+  if(dibujoEstado){
+    if(e.key==='Escape'){ cerrarModoDibujo(); return; }
+    if(e.key===' '){ e.preventDefault(); Reproductor.alternar(); setTimeout(botonPlay,60); return; }
+    if(e.key==='ArrowLeft'){ e.preventDefault(); Reproductor.salto(e.shiftKey?-5:-1); return; }
+    if(e.key==='ArrowRight'){ e.preventDefault(); Reproductor.salto(e.shiftKey?5:1); return; }
+    if(e.key===','){ Reproductor.frame(-1); return; }
+    if(e.key==='.'){ Reproductor.frame(1); return; }
+    return; // mientras se dibuja, las teclas de categorías no marcan estadísticas
   }
   if(e.key==='Escape'){ cerrarModal(); return; }
   if(document.getElementById('modal').classList.contains('abierto')) return;
