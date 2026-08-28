@@ -2125,10 +2125,20 @@ async function sincronizarConFirestore(){
       equipoPropio: p.equipoPropio, equipoRival: p.equipoRival,
       fecha: p.fecha, competicion: p.competicion, esRivalFuturo: !!p.esRivalFuturo,
       coachUid: sporting.uid,
-      // Se manda la definición de categorías (nombre/color/si cuenta en estadísticas) para que
-      // quien lea esto desde fuera (ej. Sporting) sepa interpretar el campo "tipo" de cada evento
-      // sin tener que duplicar esa lista a mano.
-      categorias: todasLasCategorias().map(c=>({id:c.id, nom:c.nom, color:c.color, stats:c.stats!==false})),
+      // Se manda la definición de categorías (nombre/color/si cuenta en estadísticas, si marca
+      // ubicación en el campo y si tiene equipo fijo) para que quien lea esto desde fuera (ej.
+      // Sporting) sepa interpretar el campo "tipo"/"punto" de cada evento sin tener que duplicar
+      // esa lista a mano.
+      categorias: todasLasCategorias().map(c=>({id:c.id, nom:c.nom, color:c.color, stats:c.stats!==false,
+        ubicacion:c.ubicacion||null, equipoFijo:c.equipoFijo||null,
+        cruzaQuinteto:!!c.cruzaQuinteto, indGol:!!c.indGol, indOcasion:!!c.indOcasion})),
+      // Plantilla propia, quinteto, pausas y saques/finales de cada parte: para que Sporting pueda
+      // calcular "por quinteto" y "rendimiento individual" (minutos jugados y tasas /10min) igual
+      // que se hace aquí — sin esto solo se pueden contar categorías, no repartir minutos.
+      plantillaPropia: estado.plantillaPropia,
+      cambiosQuinteto: estado.cambiosQuinteto,
+      pausas: estado.pausas,
+      t0: p.t0 || null, tFin: p.tFin || null,
       actualizado: firebase.firestore.FieldValue.serverTimestamp()
     }, {merge:true});
 
