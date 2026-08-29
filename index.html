@@ -2873,6 +2873,16 @@ function esperarSeek(video){
   });
 }
 
+// Los exports "con dibujo" graban un <canvas> (para quemar los trazos en el
+// vídeo), y un canvas no lleva audio. Aquí le enchufamos la pista de audio
+// del propio <video> a ese stream para que el archivo final no salga mudo.
+function añadirAudioAStream(stream, video){
+  try{
+    const audioStream = video.captureStream ? video.captureStream() : video.mozCaptureStream();
+    audioStream.getAudioTracks().forEach(t=>stream.addTrack(t));
+  }catch(err){ /* si falla, se graba igualmente sin audio en vez de romper el export */ }
+}
+
 async function capturarClip(ev){
   // Si el clip tiene algún momento dibujado dentro de su propio rango, se graba
   // distinto (vídeo + trazos quemados sobre un canvas, con congelados) — ver
@@ -2972,6 +2982,9 @@ async function capturarClipConDibujo(ev, momentos){
   const ctx=cv.getContext('2d');
   if(!cv.captureStream) throw new Error('Tu navegador no soporta grabar un lienzo (captureStream).');
   const stream=cv.captureStream(30);
+  // El canvas solo tiene imagen: le añadimos la pista de audio del propio
+  // vídeo, si no el clip queda mudo aunque el vídeo original tenga sonido.
+  añadirAudioAStream(stream, video);
   const mime=elegirMimeClip();
   const rec=new MediaRecorder(stream, mime? {mimeType:mime} : undefined);
   const trozos=[];
@@ -3021,6 +3034,7 @@ async function exportarResumenComoVideo(ids){
     const ctx=cv.getContext('2d');
     if(!cv.captureStream) throw new Error('Tu navegador no soporta grabar un lienzo (captureStream).');
     const stream=cv.captureStream(30);
+    añadirAudioAStream(stream, video);
     const mime=elegirMimeClip();
     const rec=new MediaRecorder(stream, mime? {mimeType:mime} : undefined);
     const trozos=[];
