@@ -4,7 +4,16 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="referrer" content="strict-origin-when-cross-origin">
-<title>Scouting FS · Marcaje de partido</title>
+<title>Sporting Scouting · Marcaje de partido</title>
+<link rel="manifest" href="manifest.json">
+<meta name="theme-color" content="#D8232A">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Sporting Scouting">
+<meta name="mobile-web-app-capable" content="yes">
+<link rel="icon" type="image/png" sizes="192x192" href="icon-192.png">
+<link rel="icon" type="image/png" sizes="512x512" href="icon-512.png">
+<link rel="apple-touch-icon" sizes="180x180" href="apple-touch-icon.png">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@400;500;600;700&family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
@@ -20,6 +29,13 @@
     messagingSenderId: "306369015696",
     appId: "1:306369015696:web:6aa31daf89e88c00db4d15"
   };
+</script>
+<script>
+  // Service worker mínimo (ver sw.js): solo hace falta para que Chrome/Android
+  // ofrezcan "Instalar app" con el icono correcto, no cachea nada.
+  if ("serviceWorker" in navigator) {
+    navigator.serviceWorker.register("sw.js").catch(() => {});
+  }
 </script>
 <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-auth-compat.js"></script>
@@ -82,8 +98,9 @@ input:focus,select:focus,button:focus-visible{outline:2px solid var(--rojo);outl
   background:var(--panel);border-bottom:1px solid var(--line);flex:none;
 }
 .marca{font-family:var(--display);font-size:21px;font-weight:700;letter-spacing:.06em;
-  text-transform:uppercase;white-space:nowrap}
+  text-transform:uppercase;white-space:nowrap;display:flex;align-items:center;gap:8px}
 .marca span{color:var(--rojo)}
+.marca-escudo{width:28px;height:28px;object-fit:contain;flex:none;filter:drop-shadow(0 1px 2px rgba(0,0,0,.5))}
 .reloj{
   font-family:var(--display);font-size:30px;font-weight:600;font-variant-numeric:tabular-nums;
   letter-spacing:.03em;line-height:1;padding:3px 10px;background:var(--bg);
@@ -393,7 +410,7 @@ input:focus,select:focus,button:focus-visible{outline:2px solid var(--rojo);outl
 <body>
 
 <div id="authScreen" class="pantalla">
-  <h2>Scouting<span>·</span>FS</h2>
+  <h2>Sporting <span>Scouting</span></h2>
   <p>Inicia sesión con tu cuenta de Sporting Entrenamientos para usar la app.
   Las cuentas se gestionan allí — si no tienes una, créala primero en Sporting.</p>
   <form class="caja-login" id="formLogin">
@@ -412,7 +429,7 @@ input:focus,select:focus,button:focus-visible{outline:2px solid var(--rojo);outl
 
 <div id="startScreen" class="hidden">
   <div class="caja">
-    <h2>Scouting<span>·</span>FS</h2>
+    <h2>Sporting <span>Scouting</span></h2>
     <p class="inicio-sub">Elige con qué proyecto quieres trabajar<span id="inicioCoach"></span>.</p>
     <div class="caja-cuerpo">
       <div class="fila-form" style="margin-bottom:14px">
@@ -430,9 +447,12 @@ input:focus,select:focus,button:focus-visible{outline:2px solid var(--rojo);outl
 <div id="appScreen" class="hidden">
 
 <div class="top">
-  <div class="marca">Scouting<span>·</span>FS
-    <small id="etiquetaCoach" style="display:block;font-family:var(--body);font-size:9px;font-weight:500;
-      letter-spacing:.04em;text-transform:none;color:var(--muted)"></small></div>
+  <div class="marca">
+    <img class="marca-escudo" src="icon-192.png" alt="Escudo Sporting Almería">
+    <div>Sporting <span>Scouting</span>
+      <small id="etiquetaCoach" style="display:block;font-family:var(--body);font-size:9px;font-weight:500;
+        letter-spacing:.04em;text-transform:none;color:var(--muted)"></small></div>
+  </div>
   <div class="reloj" id="reloj">00:00<small id="relojEtq">vídeo</small></div>
   <button class="btn" id="btnParte">1ª parte</button>
   <button class="btn" id="btnT0" title="Marca el saque inicial de la parte actual en este punto del vídeo">Fijar saque inicial</button>
@@ -2802,7 +2822,7 @@ function exportarClipsFFmpeg(formato){
   if(formato==='bat'){
     contenido = [
       '@echo off',
-      'REM Generado por Scouting FS · '+new Date().toLocaleString(),
+      'REM Generado por Sporting Scouting · '+new Date().toLocaleString(),
       'REM Coloca este script en la MISMA carpeta que el video del partido,',
       'REM o cambia la linea VIDEO=... por la ruta completa al archivo.',
       'REM Necesita ffmpeg instalado y accesible desde la terminal (https://ffmpeg.org/download.html).',
@@ -2820,7 +2840,7 @@ function exportarClipsFFmpeg(formato){
   } else {
     contenido = [
       '#!/bin/bash',
-      '# Generado por Scouting FS · '+new Date().toLocaleString(),
+      '# Generado por Sporting Scouting · '+new Date().toLocaleString(),
       '# Coloca este script en la MISMA carpeta que el video del partido,',
       '# o cambia la linea VIDEO=... por la ruta completa al archivo.',
       '# Necesita ffmpeg instalado (https://ffmpeg.org/download.html).',
