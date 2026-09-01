@@ -77,6 +77,7 @@ input:focus,select:focus,button:focus-visible{outline:2px solid var(--rojo);outl
 .pantalla h2{font-family:var(--display);font-size:28px;font-weight:700;letter-spacing:.06em;text-transform:uppercase}
 .pantalla h2 span{color:var(--rojo)}
 .pantalla p{color:var(--muted);max-width:340px;line-height:1.5;font-size:12px}
+.pantalla-escudo{width:76px;height:76px;object-fit:contain;filter:drop-shadow(0 2px 6px rgba(0,0,0,.5))}
 .caja-login{display:flex;flex-direction:column;gap:9px;width:min(280px,90vw)}
 .caja-login input{width:100%}
 .caja-login .error{color:#F0A0A0;font-size:11px;min-height:14px}
@@ -410,6 +411,7 @@ input:focus,select:focus,button:focus-visible{outline:2px solid var(--rojo);outl
 <body>
 
 <div id="authScreen" class="pantalla">
+  <img src="icon-192.png" alt="Escudo Sporting Almería" class="pantalla-escudo">
   <h2>Sporting <span>Scouting</span></h2>
   <p>Inicia sesión con tu cuenta de Sporting Entrenamientos para usar la app.
   Las cuentas se gestionan allí — si no tienes una, créala primero en Sporting.</p>
