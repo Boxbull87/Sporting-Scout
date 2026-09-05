@@ -4112,13 +4112,15 @@ function pintarGridCategorias(contId, panelId){
     item.setAttribute('gs-id', c.id);
     if(c.gx!=null) item.setAttribute('gs-x', c.gx);
     if(c.gy!=null) item.setAttribute('gs-y', c.gy);
-    // 10×10 celdas ≈ el tamaño de botón que ya había antes de este cambio (con la rejilla
-    // de 40 columnas / celdas de 8px) — así una categoría que nunca se ha tocado se ve igual.
-    // "<=4" descarta también los tamaños que se llegaron a guardar con la rejilla vieja de
-    // solo 4 columnas (antes de este arreglo): con 40 columnas esos valores harían el botón
-    // minúsculo, así que se tratan como si no se hubieran guardado nunca.
-    item.setAttribute('gs-w', c.gw>4? c.gw : 10);
-    item.setAttribute('gs-h', c.gh>4? c.gh : 10);
+    // 10×10 celdas ≈ el tamaño de botón de siempre (rejilla de 40 columnas, celdas de 8px):
+    // es solo el valor por defecto de una categoría que nunca se ha redimensionado.
+    // OJO: aquí NO se puede "corregir" un tamaño por parecer pequeño. Antes había un
+    // salvavidas (`c.gw>4? c.gw : 10`) pensado para datos de la rejilla vieja de 4 columnas,
+    // pero hacía que cualquier botón que encogieras por debajo de 4 celdas volviera solo a 10
+    // en el siguiente repintado, chocara con los vecinos y descolocara el panel entero en
+    // cascada. Para arreglar una disposición heredada está el botón "Restablecer disposición".
+    item.setAttribute('gs-w', c.gw || 10);
+    item.setAttribute('gs-h', c.gh || 10);
 
     const content=document.createElement('div');
     content.className='grid-stack-item-content';
@@ -4194,9 +4196,12 @@ function guardarLayoutPanelActivo(){
   if(!gsPanel) return;
   const panel = estado.paneles.find(p=>p.id===estado.panelActivoId);
   if(!panel) return;
+  // save() omite w/h cuando valen 1 y x/y cuando valen 0 (son los valores por defecto de
+  // Gridstack), así que hay que reponerlos a mano: si no, un botón encogido al mínimo se
+  // guardaba con gw/gh = undefined y al repintar volvía al tamaño por defecto (10).
   gsPanel.save(false).forEach(nodo=>{
     const c = panel.categorias.find(x=>x.id===nodo.id);
-    if(c){ c.gx=nodo.x; c.gy=nodo.y; c.gw=nodo.w; c.gh=nodo.h; }
+    if(c){ c.gx=nodo.x||0; c.gy=nodo.y||0; c.gw=nodo.w||1; c.gh=nodo.h||1; }
   });
   guardarPanelActivo();
 }
