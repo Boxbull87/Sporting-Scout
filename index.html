@@ -4102,14 +4102,23 @@ function pintarGridCategorias(contId, panelId){
     item.setAttribute('gs-id', c.id);
     if(c.gx!=null) item.setAttribute('gs-x', c.gx);
     if(c.gy!=null) item.setAttribute('gs-y', c.gy);
-    item.setAttribute('gs-w', c.gw||1);
-    item.setAttribute('gs-h', c.gh||1);
+    // 10×10 celdas ≈ el tamaño de botón que ya había antes de este cambio (con la rejilla
+    // de 40 columnas / celdas de 8px) — así una categoría que nunca se ha tocado se ve igual.
+    // "<=4" descarta también los tamaños que se llegaron a guardar con la rejilla vieja de
+    // solo 4 columnas (antes de este arreglo): con 40 columnas esos valores harían el botón
+    // minúsculo, así que se tratan como si no se hubieran guardado nunca.
+    item.setAttribute('gs-w', c.gw>4? c.gw : 10);
+    item.setAttribute('gs-h', c.gh>4? c.gh : 10);
 
     const content=document.createElement('div');
     content.className='grid-stack-item-content';
 
-    const b=document.createElement('button');
-    b.type='button';
+    // OJO: es un <div role="button">, no un <button> de verdad — Gridstack excluye a
+    // propósito cualquier clic que caiga dentro de un <button>/<input>/<select>/... (para no
+    // robarle el arrastre a un botón normal de cualquier otro dashboard), y como este botón
+    // ocupa TODA la ficha, con <button> no había forma de arrastrar nunca la ficha con él.
+    const b=document.createElement('div');
+    b.setAttribute('role','button'); b.tabIndex=0;
     b.className='cat'+(c.equipoFijo? ' cat-'+c.equipoFijo : ''); b.dataset.cat=c.id;
     const insigniaEquipo = c.equipoFijo
       ? `<span class="cat-equipo">${c.equipoFijo==='propio'?'Propio':'Rival'}</span>` : '';
@@ -4120,6 +4129,9 @@ function pintarGridCategorias(contId, panelId){
       <span class="cat-editar" title="Editar propiedades">✏️</span>
       <span class="cat-quitar" title="Quitar del panel (se puede reactivar luego en Categorías)">✕</span>`;
     b.onclick=()=>{ if(!modoEdicionPanel) marcar(c.id, modoRatonCorte); };
+    b.onkeydown=e=>{
+      if((e.key==='Enter'||e.key===' ') && !modoEdicionPanel){ e.preventDefault(); marcar(c.id, modoRatonCorte); }
+    };
     b.querySelector('.cat-editar').onpointerdown=e=>e.stopPropagation();
     b.querySelector('.cat-editar').onclick=e=>{ e.stopPropagation(); editandoCategoria=c.id; renderCategorias(); };
     b.querySelector('.cat-quitar').onpointerdown=e=>e.stopPropagation();
@@ -4134,15 +4146,21 @@ function pintarGridCategorias(contId, panelId){
     cont.appendChild(item);
   });
 
+  // column/cellHeight finos a propósito: con solo 4 columnas cada celda ocupaba ~1/4 del
+  // panel entero (50-80px de golpe), así que redimensionar "saltaba" a esos pocos tamaños
+  // posibles y no se podía bajar de ahí. Con una rejilla mucho más fina (40 columnas,
+  // celdas de 8px de alto) cada paso es de pocos píxeles — se siente como libre, aunque
+  // por debajo siga habiendo una rejilla (necesaria para que no se superpongan botones).
   gsPanel = GridStack.init({
-    column: 4,
-    cellHeight: 82,
-    margin: 6,
+    column: 40,
+    cellHeight: 8,
+    margin: 4,
     float: true,               // no compacta huecos: la posición que dejes se queda donde la dejes
     staticGrid: !modoEdicionPanel,
-    disableResize: !modoEdicionPanel,
-    disableDrag: !modoEdicionPanel,
     draggable: { cancel: '.cat-editar, .cat-quitar' },
+    // Las asas de redimensionar (bordes/esquina) solo se ven al pasar el ratón por encima de
+    // un botón — comportamiento normal de Gridstack, igual que en muchos editores de este
+    // tipo (revelar controles al pasar por encima, no dejarlos siempre puestos por medio).
     resizable: { handles: 'e, se, s, sw, w' }
   }, '#'+contId);
   gsPanel.on('change', ()=>{
@@ -4170,11 +4188,11 @@ function guardarLayoutPanelActivo(){
 // muestra el CSS de .modo-edicion-panel.
 function alternarModoEdicionPanel(){
   modoEdicionPanel = !modoEdicionPanel;
-  if(gsPanel){
-    gsPanel.setStatic(!modoEdicionPanel);
-    gsPanel.enableMove(modoEdicionPanel);
-    gsPanel.enableResize(modoEdicionPanel);
-  }
+  // Solo setStatic(): además de (des)activar arrastre/redimensionado, Gridstack la usa como
+  // el interruptor "maestro" — llamar además a enableMove()/enableResize() por separado podía
+  // dejar el arrastre a medio activar (el ratón cambiaba a icono de mover pero no arrastraba
+  // de verdad), que era justo el bug que tenías.
+  if(gsPanel) gsPanel.setStatic(!modoEdicionPanel);
   document.getElementById('marcaje')?.classList.toggle('modo-edicion-panel', modoEdicionPanel);
   const btn = document.getElementById('btnEditarPanel');
   if(btn) btn.textContent = modoEdicionPanel? '✓ Hecho' : '✏️ Editar panel';
