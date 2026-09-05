@@ -4093,7 +4093,16 @@ function renderPanelCategorias(){
 function pintarGridCategorias(contId, panelId){
   const cont=document.getElementById(contId);
   if(!cont) return;
-  if(gsPanel){ gsPanel.destroy(false); gsPanel=null; } // false: no borra los nodos, los reconstruimos igualmente
+  if(gsPanel){
+    // Si quedaba un arrastre/redimensionado reciente sin guardar todavía (el guardado real
+    // espera un poco tras cada cambio, para no escribir en cada píxel), se vuelca ahora mismo
+    // ANTES de destruir el grid — si no, este redibujado usaría las posiciones de antes de
+    // ese último cambio y parecería que "se ha movido todo solo" (esto es justo lo que pasaba
+    // al editar un botón con ✏️ nada más soltar un arrastre: guardarCategoria() reconstruye
+    // el grid, y sin este volcado se perdía el cambio pendiente).
+    if(guardarLayoutTimeout){ clearTimeout(guardarLayoutTimeout); guardarLayoutTimeout=null; guardarLayoutPanelActivo(); }
+    gsPanel.destroy(false); gsPanel=null; // false: no borra los nodos, los reconstruimos igualmente
+  }
   cont.innerHTML='';
   cont.classList.add('grid-stack');
   catsActivasDePanel(panelId).forEach(c=>{
