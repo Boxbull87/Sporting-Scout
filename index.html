@@ -40,6 +40,11 @@
 <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-auth-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore-compat.js"></script>
+<!-- Panel de categorías arrastrable/redimensionable (ver "MODO EDICIÓN DEL PANEL" más abajo).
+     gridstack-all.js es el bundle UMD (expone window.GridStack), incluye el motor de
+     arrastre/redimensionado en JS puro, sin jQuery ni más dependencias. -->
+<link href="https://cdn.jsdelivr.net/npm/gridstack@13.2.0/dist/gridstack.min.css" rel="stylesheet">
+<script src="https://cdn.jsdelivr.net/npm/gridstack@13.2.0/dist/gridstack-all.js"></script>
 <style>
 :root{
   --bg:#0E1013;
@@ -269,10 +274,19 @@ input:focus,select:focus,button:focus-visible{outline:2px solid var(--rojo);outl
 .panel-cat-cab h3{font-size:10px;font-weight:600;letter-spacing:.15em;text-transform:uppercase;color:var(--muted)}
 .panel-cat-cab select{font-size:10px;padding:3px 5px;max-width:130px}
 
-.cats{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:6px}
+/* ---------- Panel de categorías: grid arrastrable/redimensionable (Gridstack.js) ----------
+   .cats es el contenedor grid-stack; cada categoría es un .grid-stack-item con su propio
+   x/y/w/h (guardados en la propia categoría: c.gx/gy/gw/gh). En MODO PARTIDO (por defecto)
+   el grid está "estático" (Gridstack no deja arrastrar/redimensionar) y el botón .cat pulsa
+   exactamente igual que siempre. En MODO EDICIÓN aparecen los iconos ✏️/✕ y se puede
+   arrastrar/redimensionar/crear/quitar — ver alternarModoEdicionPanel(). */
+.cats{min-height:60px}
+.cats.grid-stack{background:transparent}
+.grid-stack-item-content{inset:0;} /* Gridstack ya la pone position:absolute; esto solo fija los 4 lados */
 .cat{
-  position:relative;padding:11px 8px 9px;border:1px solid var(--line);border-radius:var(--radius);
-  background:var(--panel-2);text-align:left;transition:transform .08s;
+  position:relative;width:100%;height:100%;box-sizing:border-box;display:block;
+  padding:11px 8px 9px;border:1px solid var(--line);border-radius:var(--radius);
+  background:var(--panel-2);text-align:left;transition:transform .08s,background .1s;
 }
 .cat:hover{background:#252A33}
 .cat:active{transform:scale(.97)}
@@ -293,21 +307,24 @@ input:focus,select:focus,button:focus-visible{outline:2px solid var(--rojo);outl
   text-transform:uppercase;margin-top:2px}
 .cat-propio .cat-equipo{color:var(--rojo)}
 .cat-rival .cat-equipo{color:#2E6FB7}
-.cats-compacto .cat-equipo,.cats-mini .cat-equipo{display:none}
 
-/* Densidad automática: cuando el panel de marcaje se achica y las categorías no
-   caben, en vez de recortarlas por abajo (hay que hacer scroll y no se ven todas
-   de golpe) se reducen los botones y se reparten en más columnas. Ver
-   ajustarDensidadCategorias(). */
-.cats-compacto .cats{grid-template-columns:repeat(3,1fr);gap:4px}
-.cats-compacto .cat{padding:6px 22px 5px 6px}
-.cats-compacto .cat b{font-size:12px}
-.cats-compacto .cat i{display:none}
-.cats-compacto .cat .tecla{font-size:10px;padding:0 3px;line-height:13px;top:3px;right:3px}
-.cats-mini .cats{grid-template-columns:repeat(4,1fr);gap:3px}
-.cats-mini .cat{padding:4px 16px 3px 5px}
-.cats-mini .cat b{font-size:10px;letter-spacing:0}
-.cats-mini .cat .tecla{font-size:9px;padding:0 2px;line-height:11px;top:2px;right:2px}
+/* ---------- Modo edición del panel ---------- */
+.cat-editar,.cat-quitar{
+  display:none;position:absolute;bottom:5px;width:20px;height:20px;border-radius:50%;
+  align-items:center;justify-content:center;font-size:11px;background:var(--panel);
+  border:1px solid var(--line);cursor:pointer;z-index:2;
+}
+.cat-editar{right:29px}
+.cat-quitar{right:5px;color:#F0A0A0}
+.modo-edicion-panel .cat-editar,.modo-edicion-panel .cat-quitar{display:flex}
+/* En modo edición el propio botón no debe "marcar" al soltar tras arrastrar/redimensionar
+   (marcar() se bloquea en JS por modoEdicionPanel), pero además se quita el cursor de "pulsar"
+   y se ve claramente que el panel está en modo edición: borde discontinuo en cada tarjeta y
+   fondo ligeramente distinto en todo el panel. */
+.modo-edicion-panel .panel-marcaje{background:rgba(216,35,42,.04)}
+.modo-edicion-panel .cat{cursor:move;border-style:dashed;border-color:var(--rojo-dim)}
+.modo-edicion-panel .cat:active{transform:none}
+.modo-edicion-panel .grid-stack-item-content{overflow:visible}
 
 /* asignación rápida */
 .rapida{padding:10px 11px;margin:9px 0 0;background:var(--panel-2);border-radius:var(--radius);display:none}
@@ -617,6 +634,9 @@ input:focus,select:focus,button:focus-visible{outline:2px solid var(--rojo);outl
         <div class="panel-cat-cab">
           <h3>Panel</h3>
           <select id="selectorPanel" title="Cambiar de panel"></select>
+          <div style="flex:1"></div>
+          <button class="btn hidden" id="btnAnadirBotonPanel" style="padding:3px 8px;font-size:10px" onclick="abrirCategorias()" title="Añade una categoría nueva (se coloca sola en el primer hueco libre)">+ Botón</button>
+          <button class="btn" id="btnEditarPanel" style="padding:3px 8px;font-size:10px" onclick="alternarModoEdicionPanel()" title="Mover, redimensionar, añadir o quitar botones del panel">✏️ Editar panel</button>
         </div>
         <div class="cats" id="cats"></div>
       </div>
@@ -4047,44 +4067,130 @@ function botonPlay(){
 // panel de categorías: se repinta al arrancar y cada vez que se editan
 // categorías desde el modal "Categorías" (añadir/editar/activar/desactivar), o al
 // cambiar de panel activo con el selector.
+/* =====================================================================
+   PANEL DE CATEGORÍAS: grid arrastrable/redimensionable (Gridstack.js)
+   =====================================================================
+   Cada categoría guarda su posición/tamaño de rejilla en sí misma (c.gx, c.gy,
+   c.gw, c.gh — columna, fila, ancho y alto en celdas). Si faltan (categoría
+   nueva, o un panel creado antes de este cambio), Gridstack la coloca sola en
+   el primer hueco libre — no hace falta ninguna migración de datos.
+
+   MODO PARTIDO (por defecto): el grid está "estático" — Gridstack no deja
+   arrastrar ni redimensionar, y cada botón .cat pulsa marcar() exactamente
+   igual que siempre (por teclado o clic). MODO EDICIÓN: el grid deja
+   arrastrar/redimensionar libremente, aparecen los iconos ✏️ (editar
+   propiedades, mismo formulario de siempre) y ✕ (desactivar, igual que ya
+   hacía "Desactivar" en Categorías) sobre cada botón, y pulsar el botón ya NO
+   marca un evento (para no marcar sin querer mientras reorganizas). Cambiar
+   de panel (cambiarPanel) reconstruye el grid entero para el panel nuevo. */
+let gsPanel = null;           // instancia Gridstack activa
+let modoEdicionPanel = false;
+let guardarLayoutTimeout = null;
+
 function renderPanelCategorias(){
   pintarGridCategorias('cats', estado.panelActivoId);
-  ajustarDensidadCategorias();
 }
 function pintarGridCategorias(contId, panelId){
   const cont=document.getElementById(contId);
   if(!cont) return;
+  if(gsPanel){ gsPanel.destroy(false); gsPanel=null; } // false: no borra los nodos, los reconstruimos igualmente
   cont.innerHTML='';
+  cont.classList.add('grid-stack');
   catsActivasDePanel(panelId).forEach(c=>{
+    const item=document.createElement('div');
+    item.className='grid-stack-item';
+    item.setAttribute('gs-id', c.id);
+    if(c.gx!=null) item.setAttribute('gs-x', c.gx);
+    if(c.gy!=null) item.setAttribute('gs-y', c.gy);
+    item.setAttribute('gs-w', c.gw||1);
+    item.setAttribute('gs-h', c.gh||1);
+
+    const content=document.createElement('div');
+    content.className='grid-stack-item-content';
+
     const b=document.createElement('button');
+    b.type='button';
     b.className='cat'+(c.equipoFijo? ' cat-'+c.equipoFijo : ''); b.dataset.cat=c.id;
     const insigniaEquipo = c.equipoFijo
       ? `<span class="cat-equipo">${c.equipoFijo==='propio'?'Propio':'Rival'}</span>` : '';
     b.innerHTML=`<span class="franja" style="background:${c.color}"></span>
       <span class="tecla">${c.tecla}</span><b>${c.nom}</b>
       <i>${c.modo==='manual'? 'activar / parar' : '−'+c.pre+'s / +'+c.post+'s'}</i>
-      ${insigniaEquipo}`;
-    b.onclick=()=>marcar(c.id, modoRatonCorte);
-    cont.appendChild(b);
+      ${insigniaEquipo}
+      <span class="cat-editar" title="Editar propiedades">✏️</span>
+      <span class="cat-quitar" title="Quitar del panel (se puede reactivar luego en Categorías)">✕</span>`;
+    b.onclick=()=>{ if(!modoEdicionPanel) marcar(c.id, modoRatonCorte); };
+    b.querySelector('.cat-editar').onpointerdown=e=>e.stopPropagation();
+    b.querySelector('.cat-editar').onclick=e=>{ e.stopPropagation(); editandoCategoria=c.id; renderCategorias(); };
+    b.querySelector('.cat-quitar').onpointerdown=e=>e.stopPropagation();
+    b.querySelector('.cat-quitar').onclick=e=>{
+      e.stopPropagation();
+      if(confirm('¿Quitar "'+c.nom+'" del panel? Se desactiva (igual que "Desactivar" en Categorías), no se borra: puedes reactivarla luego.')){
+        quitarCategoriaDesdeGrid(c.id);
+      }
+    };
+    content.appendChild(b);
+    item.appendChild(content);
+    cont.appendChild(item);
+  });
+
+  gsPanel = GridStack.init({
+    column: 4,
+    cellHeight: 82,
+    margin: 6,
+    float: true,               // no compacta huecos: la posición que dejes se queda donde la dejes
+    staticGrid: !modoEdicionPanel,
+    disableResize: !modoEdicionPanel,
+    disableDrag: !modoEdicionPanel,
+    draggable: { cancel: '.cat-editar, .cat-quitar' },
+    resizable: { handles: 'e, se, s, sw, w' }
+  }, '#'+contId);
+  gsPanel.on('change', ()=>{
+    clearTimeout(guardarLayoutTimeout);
+    guardarLayoutTimeout = setTimeout(guardarLayoutPanelActivo, 400);
   });
 }
 
-// Si al achicar el panel de marcaje las categorías dejan de caber, en vez de
-// recortarlas por abajo (obligando a hacer scroll para ver el resto) se
-// achican los propios botones y se reparten en más columnas. Se prueba desde
-// el tamaño normal hacia abajo cada vez (no se queda "pegado" en compacto si
-// luego agrandas el panel otra vez).
-function ajustarDensidadCategorias(){
-  const marcaje=document.getElementById('marcaje');
-  const panel=document.querySelector('.panel-marcaje');
-  if(!marcaje || !panel) return;
-  marcaje.classList.remove('cats-compacto','cats-mini');
-  if(panel.scrollHeight > panel.clientHeight+1){
-    marcaje.classList.add('cats-compacto');
-    if(panel.scrollHeight > panel.clientHeight+1){
-      marcaje.classList.add('cats-mini');
-    }
+// Vuelca las posiciones/tamaños actuales del grid en las categorías del panel activo y
+// persiste (local + Firestore) con el mismo guardarPanelActivo() de siempre — el layout es
+// un campo más de cada categoría, no un sistema de guardado aparte.
+function guardarLayoutPanelActivo(){
+  if(!gsPanel) return;
+  const panel = estado.paneles.find(p=>p.id===estado.panelActivoId);
+  if(!panel) return;
+  gsPanel.save(false).forEach(nodo=>{
+    const c = panel.categorias.find(x=>x.id===nodo.id);
+    if(c){ c.gx=nodo.x; c.gy=nodo.y; c.gw=nodo.w; c.gh=nodo.h; }
+  });
+  guardarPanelActivo();
+}
+
+// Entra/sale del modo edición. No reconstruye el grid (gsPanel.setStatic basta y no pierde
+// el estado de arrastre a medias): los iconos ✏️/✕ ya están siempre en el DOM, solo los
+// muestra el CSS de .modo-edicion-panel.
+function alternarModoEdicionPanel(){
+  modoEdicionPanel = !modoEdicionPanel;
+  if(gsPanel){
+    gsPanel.setStatic(!modoEdicionPanel);
+    gsPanel.enableMove(modoEdicionPanel);
+    gsPanel.enableResize(modoEdicionPanel);
   }
+  document.getElementById('marcaje')?.classList.toggle('modo-edicion-panel', modoEdicionPanel);
+  const btn = document.getElementById('btnEditarPanel');
+  if(btn) btn.textContent = modoEdicionPanel? '✓ Hecho' : '✏️ Editar panel';
+  const btnAdd = document.getElementById('btnAnadirBotonPanel');
+  if(btnAdd) btnAdd.classList.toggle('hidden', !modoEdicionPanel);
+  if(!modoEdicionPanel){ clearTimeout(guardarLayoutTimeout); guardarLayoutPanelActivo(); }
+}
+// Como toggleActivaCategoria() (usada desde la tabla del modal "Categorías") también refresca
+// ese modal (renderCategorias()), no sirve para el icono ✕ del grid: reabriría el modal grande
+// encima del panel que se está editando. Misma acción (desactivar, no borrar) sin ese efecto.
+function quitarCategoriaDesdeGrid(id){
+  const c = estado.categorias.find(c=>c.id===id);
+  if(!c) return;
+  c.activa = false;
+  guardarPanelActivo();
+  renderPanelCategorias();
 }
 
 // Selectores compactos para cambiar de panel sin salir del marcaje (encima de cada
@@ -4324,7 +4430,6 @@ function guardarLayout(cambios){
   const izq=document.querySelector('.izq');
   const guardado=cargarLayoutGuardado().marcajeAltura;
   if(guardado) marcaje.style.height=guardado+'px';
-  ajustarDensidadCategorias();
 
   let y0=0, h0=0;
   tirador.addEventListener('pointerdown',e=>{
@@ -4336,7 +4441,6 @@ function guardarLayout(cambios){
     if(!tirador.classList.contains('arrastrando')) return;
     const min=90, max=Math.max(min, izq.getBoundingClientRect().height-160);
     marcaje.style.height=Math.min(max,Math.max(min, h0-(e.clientY-y0)))+'px';
-    ajustarDensidadCategorias();
   });
   tirador.addEventListener('pointerup',()=>{
     if(!tirador.classList.contains('arrastrando')) return;
@@ -4346,7 +4450,6 @@ function guardarLayout(cambios){
   tirador.addEventListener('dblclick',()=>{
     marcaje.style.removeProperty('height');
     guardarLayout({marcajeAltura:null});
-    ajustarDensidadCategorias();
   });
 })();
 
