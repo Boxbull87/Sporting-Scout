@@ -636,6 +636,7 @@ input:focus,select:focus,button:focus-visible{outline:2px solid var(--rojo);outl
           <select id="selectorPanel" title="Cambiar de panel"></select>
           <div style="flex:1"></div>
           <button class="btn hidden" id="btnAnadirBotonPanel" style="padding:3px 8px;font-size:10px" onclick="abrirCategorias()" title="Añade una categoría nueva (se coloca sola en el primer hueco libre)">+ Botón</button>
+          <button class="btn hidden" id="btnResetDisposicionPanel" style="padding:3px 8px;font-size:10px" onclick="restablecerDisposicionPanel()" title="Quita las posiciones/tamaños personalizados de este panel — ninguna categoría, tecla ni propiedad se pierde">↺ Restablecer disposición</button>
           <button class="btn" id="btnEditarPanel" style="padding:3px 8px;font-size:10px" onclick="alternarModoEdicionPanel()" title="Mover, redimensionar, añadir o quitar botones del panel">✏️ Editar panel</button>
         </div>
         <div class="cats" id="cats"></div>
@@ -4172,7 +4173,15 @@ function pintarGridCategorias(contId, panelId){
     // tipo (revelar controles al pasar por encima, no dejarlos siempre puestos por medio).
     resizable: { handles: 'e, se, s, sw, w' }
   }, '#'+contId);
+  // Si al inicializar Gridstack detecta que dos categorías "chocan" (por ejemplo por datos
+  // de una versión anterior con otra escala de rejilla) las recoloca ella sola para que no se
+  // superpongan, y eso también dispara 'change' — sin este margen, esa autocorrección se
+  // guardaría como si el usuario la hubiera hecho a propósito, dejando la disposición mala
+  // "congelada" para siempre. Los cambios de verdad (arrastrar/redimensionar) siempre tardan
+  // más de 300ms desde que se pinta el panel, así que no se pierde ningún cambio real.
+  const gridListoDesde = Date.now() + 300;
   gsPanel.on('change', ()=>{
+    if(Date.now() < gridListoDesde) return;
     clearTimeout(guardarLayoutTimeout);
     guardarLayoutTimeout = setTimeout(guardarLayoutPanelActivo, 400);
   });
@@ -4207,7 +4216,23 @@ function alternarModoEdicionPanel(){
   if(btn) btn.textContent = modoEdicionPanel? '✓ Hecho' : '✏️ Editar panel';
   const btnAdd = document.getElementById('btnAnadirBotonPanel');
   if(btnAdd) btnAdd.classList.toggle('hidden', !modoEdicionPanel);
+  const btnReset = document.getElementById('btnResetDisposicionPanel');
+  if(btnReset) btnReset.classList.toggle('hidden', !modoEdicionPanel);
   if(!modoEdicionPanel){ clearTimeout(guardarLayoutTimeout); guardarLayoutPanelActivo(); }
+}
+// Escape hatch por si el panel se queda con una disposición rota (p.ej. arrastrada por una
+// auto-corrección de Gridstack que se guardó sin querer) — quita SOLO la posición/tamaño de
+// cada categoría del panel activo, nunca la categoría, tecla, color ni ninguna otra propiedad.
+// Al perder gx/gy/gw/gh, pintarGridCategorias() las coloca de nuevo sola en el primer hueco
+// libre, con el tamaño normal.
+function restablecerDisposicionPanel(){
+  const panel = estado.paneles.find(p=>p.id===estado.panelActivoId);
+  if(!panel) return;
+  if(!confirm('¿Restablecer la disposición de "'+panel.nombre+'"? Todos los botones volverán a su tamaño normal y se colocarán en orden automáticamente. No se pierde ninguna categoría, tecla ni propiedad — solo la posición y el tamaño.')) return;
+  panel.categorias.forEach(c=>{ delete c.gx; delete c.gy; delete c.gw; delete c.gh; });
+  guardarPanelActivo();
+  renderPanelCategorias();
+  toast('Disposición restablecida.');
 }
 // Como toggleActivaCategoria() (usada desde la tabla del modal "Categorías") también refresca
 // ese modal (renderCategorias()), no sirve para el icono ✕ del grid: reabriría el modal grande
