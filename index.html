@@ -156,6 +156,15 @@ input:focus,select:focus,button:focus-visible{outline:2px solid var(--rojo);outl
 .resize-h{height:6px;flex:none;background:var(--line);cursor:row-resize}
 .resize-h:hover,.resize-h.arrastrando{background:var(--rojo)}
 
+/* ---------- TÍTULO DEL CLIP (overlay arriba a la derecha, ver tituloEvento()) ---------- */
+#tituloOverlay{
+  position:absolute;top:8px;right:8px;z-index:14;pointer-events:none;
+  background:rgba(14,16,19,.78);border-radius:6px;padding:5px 11px;
+  font-family:var(--display, Inter, sans-serif);font-weight:700;font-size:15px;
+  color:#fff;letter-spacing:.02em;max-width:calc(100% - 16px);
+  overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
+}
+
 /* ---------- MODO DIBUJO (telestrator sobre el vídeo pausado, solo local) ---------- */
 #dibujoCanvas{position:absolute;z-index:15;cursor:crosshair;touch-action:none}
 /* Anclada a una esquina y con ancho limitado (no de lado a lado) para tapar lo
@@ -495,6 +504,7 @@ input:focus,select:focus,button:focus-visible{outline:2px solid var(--rojo);outl
     <div class="video-zona" id="videoZona">
       <video id="vidLocal" playsinline></video>
       <div id="ytHost"></div>
+      <div id="tituloOverlay" class="hidden"></div>
       <canvas id="dibujoCanvas" class="hidden"></canvas>
       <div class="dibujo-barra hidden" id="dibujoBarra">
         <div class="dibujo-fila" style="justify-content:space-between;margin-bottom:1px">
@@ -971,8 +981,31 @@ function nuevoEvento(cat,t_in,t_out,t_mark,corte){
     punto: null,                  // {x,y} normalizados 0..1, solo si la categoría marca ubicación
     corte: !!corte,               // true = este evento en concreto genera clip exportable (además de estadística)
     dibujos: [],                  // momentos dibujados a mano sobre el vídeo (ver MODO DIBUJO), solo vídeo local
+    tituloOn: false,               // true = mostrar un título arriba a la derecha mientras se ve/exporta este clip
+    tituloTexto: '',               // vacío = título automático ("Gol 2"...), si no el texto tal cual (ver tituloEvento())
     creado: new Date().toISOString()
   };
+}
+
+/* ---------- Título del clip (overlay arriba a la derecha al ver/exportar un evento) ----------
+   Automático = nombre de la categoría + su posición cronológica entre los eventos DE ESA MISMA
+   categoría Y equipo (propio/rival por separado: "Gol 1"/"Gol 2" propios no se mezclan con los
+   del rival). Es dinámico, no se guarda un número fijo: si borras un gol de en medio, los
+   siguientes pasan a numerarse solos sin tener que retocar nada. */
+function tituloAutomaticoEvento(ev){
+  const cat = todasLasCategorias().find(c=>c.id===ev.tipo);
+  const nombre = cat? cat.nom : ev.tipo;
+  const mismos = estado.eventos.filter(e=>e.tipo===ev.tipo && e.equipo===ev.equipo)
+    .sort((a,b)=>a.t_mark-b.t_mark);
+  const ordinal = mismos.findIndex(e=>e.id===ev.id)+1;
+  return nombre+' '+ordinal;
+}
+// null si el título está desactivado para este evento; si no, el texto a mostrar/quemar
+// (el personalizado si se escribió algo, si no el automático).
+function tituloEvento(ev){
+  if(!ev.tituloOn) return null;
+  const texto = (ev.tituloTexto||'').trim();
+  return texto || tituloAutomaticoEvento(ev);
 }
 
 /* ---------- Ubicación en el campo de un evento: pausa el vídeo, muestra el campo (según
@@ -1190,6 +1223,25 @@ function dibujarTrazoDibujo(ctx,cv,t){
     ctx.textBaseline='top';
     ctx.fillText(t.texto, X(t.x), Y(t.y));
   }
+}
+// Quema el título del clip (ver tituloEvento()) arriba a la derecha del
+// fotograma, mismo aspecto que el overlay #tituloOverlay que se ve en directo.
+function dibujarTituloEnCanvas(ctx,cv,texto){
+  const tam=Math.max(14,Math.round(cv.width*0.028));
+  ctx.font='700 '+tam+'px Inter, sans-serif';
+  ctx.textBaseline='top';
+  const padX=tam*0.7, padY=tam*0.45;
+  const anchoTexto=ctx.measureText(texto).width;
+  const cajaAncho=Math.min(anchoTexto+padX*2, cv.width-16);
+  const cajaAlto=tam+padY*2;
+  const x=cv.width-16-cajaAncho, y=16;
+  ctx.fillStyle='rgba(14,16,19,.78)';
+  ctx.fillRect(x,y,cajaAncho,cajaAlto);
+  ctx.fillStyle='#fff';
+  ctx.save();
+  ctx.beginPath(); ctx.rect(x,y,cajaAncho,cajaAlto); ctx.clip();
+  ctx.fillText(texto, x+padX, y+padY);
+  ctx.restore();
 }
 function iniciarTrazoDibujo(e){
   if(!dibujoEstado) return;
@@ -1740,7 +1792,23 @@ setInterval(()=>{
     const el=document.querySelector('.ev[data-id="'+ev.id+'"]');
     if(el) el.style.width=Math.max(4,(ev.t_out-ev.t_in)*estado.pxs)+'px';
   });
+
+  actualizarTituloOverlay(t);
 },100);
+
+// Muestra el título del clip (ver tituloEvento()) mientras el cabezal está
+// dentro del rango [t_in,t_out] de un evento con el título activado. Si el
+// cabezal cae dentro de varios a la vez (clips solapados), se enseña el del
+// evento marcado más recientemente sobre ese instante.
+function actualizarTituloOverlay(t){
+  const el=document.getElementById('tituloOverlay');
+  if(!el) return;
+  const candidatos=estado.eventos.filter(e=>t>=e.t_in && t<=e.t_out && tituloEvento(e)!=null);
+  if(!candidatos.length){ el.classList.add('hidden'); return; }
+  const ev=candidatos.sort((a,b)=>b.t_mark-a.t_mark)[0];
+  el.textContent=tituloEvento(ev);
+  el.classList.remove('hidden');
+}
 
 function tc(s){
   s=Math.max(0,s||0);
@@ -2650,6 +2718,15 @@ function abrirEventos(){
       <td>${ev.equipo==='propio'?'Propio':'Rival'}</td>
       <td>${etiquetaJugador(ev)||'<span style="color:var(--muted)">sin asignar</span>'}</td>
       <td>${ev.resultado||'—'}</td>
+      <td style="white-space:nowrap">
+        <label style="display:flex;align-items:center;gap:3px;cursor:pointer" title="Mostrar un título arriba a la derecha al ver/exportar este clip">
+          <input type="checkbox" ${ev.tituloOn?'checked':''} onchange="toggleTituloEvento('${ev.id}', this.checked)">
+          <input type="text" value="${ev.tituloTexto||''}" placeholder="${tituloAutomaticoEvento(ev)}"
+            style="width:76px;font-size:10px;padding:2px 4px" ${ev.tituloOn?'':'disabled'}
+            title="Déjalo vacío para el título automático, o escribe el tuyo"
+            onchange="cambiarTituloTextoEvento('${ev.id}', this.value)">
+        </label>
+      </td>
       <td class="tc">${categoriaGeneraClip(ev.tipo)
         ? `<button class="btn" style="padding:2px 6px" onclick="toggleCorte('${ev.id}')" title="Cambiar entre Estadística y Corte">${ev.corte?'✂️ Corte':'Estad.'}</button>`
         : `<span style="color:var(--muted);font-size:10px" title="Panel solo-estadísticas: nunca genera clip">—</span>`}</td>
@@ -2737,7 +2814,7 @@ function abrirEventos(){
         pero necesita FFmpeg instalado y ejecutar el script manualmente.</p>
     </details>
     <div style="overflow-x:auto"><table class="tabla"><thead><tr><th></th><th>Min</th><th>Categoría</th><th>Equipo</th><th>Jugador</th>
-     <th>Resultado</th><th>Corte</th><th>Ubic.</th><th>Dibujo</th><th>Clip</th><th></th></tr></thead><tbody>${filas}</tbody></table></div>`);
+     <th>Resultado</th><th>Título</th><th>Corte</th><th>Ubic.</th><th>Dibujo</th><th>Clip</th><th></th></tr></thead><tbody>${filas}</tbody></table></div>`);
 }
 // Reproducir "solo este evento": al llegar a tLimite se para sola, en vez de
 // seguir hasta el final del vídeo. Si mientras tanto pausas tú a mano antes de
@@ -2780,6 +2857,18 @@ function borrarEvento(id){
   const i=estado.eventos.findIndex(e=>e.id===id);
   if(i>=0) estado.eventos.splice(i,1);
   guardar(); pintarTimeline(); abrirEventos();
+}
+function toggleTituloEvento(id, on){
+  const ev=estado.eventos.find(e=>e.id===id);
+  if(!ev) return;
+  ev.tituloOn=on;
+  guardar(); abrirEventos();
+}
+function cambiarTituloTextoEvento(id, texto){
+  const ev=estado.eventos.find(e=>e.id===id);
+  if(!ev) return;
+  ev.tituloTexto=texto;
+  guardar(); abrirEventos();
 }
 function marcarTodosExport(valor){
   document.querySelectorAll('.chk-export').forEach(c=>{ c.checked=valor; });
@@ -2927,11 +3016,12 @@ function añadirAudioAStream(stream, video){
 }
 
 async function capturarClip(ev){
-  // Si el clip tiene algún momento dibujado dentro de su propio rango, se graba
-  // distinto (vídeo + trazos quemados sobre un canvas, con congelados) — ver
-  // capturarClipConDibujo(). Si no, el camino de siempre: se graba el vídeo tal cual.
+  // Si el clip tiene algún momento dibujado dentro de su propio rango, o tiene
+  // un título activado, se graba distinto (vídeo + trazos/título quemados sobre
+  // un canvas, con congelados) — ver capturarClipConDibujo(). Si no, el camino
+  // de siempre: se graba el vídeo tal cual.
   const momentos = (ev.dibujos||[]).filter(m=>m.t>=ev.t_in && m.t<=ev.t_out).sort((a,b)=>a.t-b.t);
-  if(momentos.length) return capturarClipConDibujo(ev, momentos);
+  if(momentos.length || tituloEvento(ev)!=null) return capturarClipConDibujo(ev, momentos);
 
   const video=document.getElementById('vidLocal');
   const velocidadPrevia=video.playbackRate;
@@ -2980,10 +3070,12 @@ async function reproducirEventoEnCanvas(ev, video, ctx, cv){
   video.currentTime=ev.t_in;
   await esperarSeek(video);
   const pendientes=(ev.dibujos||[]).filter(m=>m.t>=ev.t_in && m.t<=ev.t_out).sort((a,b)=>a.t-b.t);
+  const titulo=tituloEvento(ev);
   let trazosVisibles=[];
   const pintar=()=>{
     ctx.drawImage(video,0,0,cv.width,cv.height);
     trazosVisibles.forEach(t=>dibujarTrazoDibujo(ctx,cv,t));
+    if(titulo) dibujarTituloEnCanvas(ctx,cv,titulo);
   };
   await video.play();
   let parar=false;
