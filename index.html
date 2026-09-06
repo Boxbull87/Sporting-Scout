@@ -159,8 +159,8 @@ input:focus,select:focus,button:focus-visible{outline:2px solid var(--rojo);outl
 /* ---------- TÍTULO DEL CLIP (overlay arriba a la derecha, ver tituloEvento()) ---------- */
 #tituloOverlay{
   position:absolute;top:8px;right:8px;z-index:14;pointer-events:none;
-  background:rgba(14,16,19,.78);border-radius:6px;padding:5px 11px;
-  font-family:var(--display, Inter, sans-serif);font-weight:700;font-size:15px;
+  background:rgba(14,16,19,.55);border-radius:4px;padding:3px 8px;
+  font-family:var(--display, Inter, sans-serif);font-weight:600;font-size:12px;
   color:#fff;letter-spacing:.02em;max-width:calc(100% - 16px);
   overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
 }
@@ -1227,15 +1227,15 @@ function dibujarTrazoDibujo(ctx,cv,t){
 // Quema el título del clip (ver tituloEvento()) arriba a la derecha del
 // fotograma, mismo aspecto que el overlay #tituloOverlay que se ve en directo.
 function dibujarTituloEnCanvas(ctx,cv,texto){
-  const tam=Math.max(14,Math.round(cv.width*0.028));
-  ctx.font='700 '+tam+'px Inter, sans-serif';
+  const tam=Math.max(11,Math.round(cv.width*0.016));
+  ctx.font='600 '+tam+'px Inter, sans-serif';
   ctx.textBaseline='top';
-  const padX=tam*0.7, padY=tam*0.45;
+  const padX=tam*0.6, padY=tam*0.4;
   const anchoTexto=ctx.measureText(texto).width;
   const cajaAncho=Math.min(anchoTexto+padX*2, cv.width-16);
   const cajaAlto=tam+padY*2;
   const x=cv.width-16-cajaAncho, y=16;
-  ctx.fillStyle='rgba(14,16,19,.78)';
+  ctx.fillStyle='rgba(14,16,19,.55)';
   ctx.fillRect(x,y,cajaAncho,cajaAlto);
   ctx.fillStyle='#fff';
   ctx.save();
