@@ -682,7 +682,7 @@ input:focus,select:focus,button:focus-visible{outline:2px solid var(--rojo);outl
             <button id="eqPropio" class="on">Propio</button>
             <button id="eqRival" class="rival">Rival</button>
           </div>
-          <div class="equipo-sw" id="modoSw" title="Con el ratón: qué se marca al pulsar una categoría. Con teclado: la tecla sola siempre marca Estadística, Shift+tecla siempre marca Corte.">
+          <div class="equipo-sw" id="modoSw" title="Qué se marca al pulsar una categoría (con el ratón o con su tecla sola). Shift+tecla siempre marca Corte, sin tener que tocar este interruptor.">
             <button id="modoEstadistica" class="on">Estadística</button>
             <button id="modoCorteRaton">Corte</button>
           </div>
@@ -4944,8 +4944,10 @@ function guardarLayout(cambios){
 document.getElementById('eqPropio').onclick=()=>cambiarEquipo('propio');
 document.getElementById('eqRival').onclick=()=>cambiarEquipo('rival');
 
-// Modo de marcaje con el ratón: solo afecta al clic sobre una categoría (el teclado
-// sigue igual: tecla=estadística, Shift+tecla=corte, sin depender de este interruptor).
+// Interruptor de qué se marca por defecto (Estadística o Corte) al pulsar una categoría,
+// con el ratón O con su tecla sola. El nombre se quedó de cuando solo afectaba al ratón,
+// pero ahora también lo lee el manejador de teclado (ver el 'keydown' más abajo) — Shift+tecla
+// sigue forzando Corte siempre, para saltarte el interruptor sin tener que tocarlo.
 let modoRatonCorte=false;
 function cambiarModoRaton(corte){
   modoRatonCorte=corte;
@@ -5107,12 +5109,15 @@ document.addEventListener('keydown',e=>{
   // Busca la categoría del panel activo con esa tecla. Si no hay coincidencia directa
   // pero se pulsó Shift, se prueba también con la tecla física de base (ver teclaBase)
   // por si Shift cambió el carácter (p.ej. Shift+1 da e.key='!' en muchos teclados).
-  // Shift no cambia CUÁL categoría se marca, solo si además genera corte de vídeo
-  // (ver marcar()): tecla sola = estadística, Shift+tecla = corte.
+  // Shift no cambia CUÁL categoría se marca, solo si además genera corte de vídeo (ver
+  // marcar()): tecla sola sigue el interruptor Estadística/Corte de arriba (modoRatonCorte,
+  // pese al nombre ya no es "solo ratón" — antes la tecla sola SIEMPRE marcaba Estadística
+  // pasara lo que pasara con el interruptor, lo cual no era el comportamiento esperado),
+  // y Shift+tecla siempre fuerza Corte, para saltarte el interruptor sin tener que tocarlo.
   const cats=catsActivasDePanel(estado.panelActivoId);
   let cat=cats.find(c=>c.tecla===e.key);
   if(!cat && e.shiftKey) cat=cats.find(c=>c.tecla===teclaBase(e));
-  if(cat){ e.preventDefault(); marcar(cat.id, e.shiftKey); return; }
+  if(cat){ e.preventDefault(); marcar(cat.id, e.shiftKey || modoRatonCorte); return; }
 
   switch(e.key){
     case ' ': e.preventDefault(); Reproductor.alternar(); setTimeout(botonPlay,60); break;
