@@ -60,6 +60,9 @@
   --radius:6px;
   --display:'Barlow Condensed',Impact,'Arial Narrow',sans-serif;
   --body:'Inter',system-ui,-apple-system,sans-serif;
+  /* Transparencia de los paneles que flotan encima del vídeo en pantalla completa (panel de
+     categorías, ventana de asignar, ubicación en el campo, quinteto) — ver rangoTransparenciaFS. */
+  --fs-alpha:.78;
 }
 *{box-sizing:border-box;margin:0;padding:0}
 html{color-scheme:dark}
@@ -210,21 +213,38 @@ input:focus,select:focus,button:focus-visible{outline:2px solid var(--rojo);outl
 .video-zona:fullscreen{width:100vw;height:100vh}
 .video-zona:-webkit-full-screen{width:100vw;height:100vh}
 
-/* ---------- Panel de categorías flotando ENCIMA del vídeo en pantalla completa ----------
-   Con "Panel en pantalla completa" activado (ver chkPanelEnFullscreen), al entrar en
-   pantalla completa el propio nodo #marcaje se traslada dentro de #videoZona (ver
-   actualizarPanelEnPantallaCompleta más abajo) — solo lo que esté DENTRO del elemento que
-   está en :fullscreen se sigue viendo, así que no basta con posicionarlo con CSS, hay que
-   moverlo de verdad. Al salir de pantalla completa (o desactivar la opción) vuelve a su
-   sitio de siempre, debajo de la línea de tiempo. */
+/* ---------- Paneles flotando ENCIMA del vídeo en pantalla completa ----------
+   Con "Panel en pantalla completa" y/o "Quinteto en pantalla completa" activados (ver
+   chkPanelEnFullscreen / chkQuintetoEnFullscreen), al entrar en pantalla completa los
+   propios nodos (#marcaje, #ubicacionModal, #lat) se trasladan dentro de #videoZona (ver
+   actualizarOverlaysPantallaCompleta más abajo) — solo lo que esté DENTRO del elemento que
+   está en :fullscreen se sigue viendo, así que no basta con posicionarlos con CSS, hay que
+   moverlos de verdad. Al salir de pantalla completa (o desactivar la opción) cada uno vuelve
+   a su sitio de siempre. Todos comparten --fs-alpha (rangoTransparenciaFS) como único mando
+   de transparencia, para no tener que ajustar cada panel por separado. */
 .marcaje.marcaje-flotante{
   position:absolute;left:0;right:0;bottom:0;z-index:18;
   max-height:58%;border-top:1px solid var(--line);border-radius:8px 8px 0 0;
-  background:rgba(14,16,19,.78);
+  background:rgba(14,16,19,var(--fs-alpha));
 }
-.marcaje.marcaje-flotante .cat{background:rgba(30,34,42,.7)}
-.marcaje.marcaje-flotante .rapida{background:rgba(30,34,42,.85)}
-.marcaje.marcaje-flotante .equipo-sw button{background:rgba(30,34,42,.7)}
+.marcaje.marcaje-flotante .cat{background:rgba(30,34,42,var(--fs-alpha))}
+.marcaje.marcaje-flotante .rapida{background:rgba(30,34,42,var(--fs-alpha))}
+.marcaje.marcaje-flotante .equipo-sw button{background:rgba(30,34,42,var(--fs-alpha))}
+
+/* Ubicación en el campo: normalmente es un .modal de toda la pantalla (position:fixed) —
+   fuera de #videoZona no se vería nada en pantalla completa. Flotando, se ancla dentro del
+   propio #videoZona (position:relative) en vez de en todo el viewport. */
+#ubicacionModal.modal-flotante{position:absolute;background:rgba(8,9,11,var(--fs-alpha));z-index:19}
+#ubicacionModal.modal-flotante .caja{background:rgba(23,26,31,var(--fs-alpha))}
+
+/* Quinteto en pista (sustituciones): ancla al lado derecho, para no chocar con el panel de
+   categorías (que ancla abajo) salvo en la esquina inferior derecha si los dos están activos. */
+.lat.lat-flotante{
+  position:absolute;top:0;right:0;bottom:0;z-index:18;
+  width:min(280px,42%);border-left:1px solid var(--line);
+  background:rgba(14,16,19,var(--fs-alpha));
+}
+.lat.lat-flotante .jp{background:rgba(30,34,42,var(--fs-alpha))}
 
 /* pantalla de carga de fuente */
 .fuente{
@@ -621,8 +641,15 @@ input:focus,select:focus,button:focus-visible{outline:2px solid var(--rojo);outl
         <option value="16">16 px/s</option>
       </select>
       <button class="tbtn" id="btnFullscreen" title="Pantalla completa">⛶</button>
-      <label style="display:flex;align-items:center;gap:4px;font-size:10px;margin-left:6px;white-space:nowrap" title="Al poner pantalla completa, el panel de categorías y la ventana de asignar (jugador, resultado, título...) quedan flotando semi-transparentes encima del vídeo, sin tener que salir de pantalla completa para marcar.">
+      <label style="display:flex;align-items:center;gap:4px;font-size:10px;margin-left:6px;white-space:nowrap" title="Al poner pantalla completa, el panel de categorías, la ventana de asignar (jugador, resultado, título...) y la ubicación en el campo quedan flotando semi-transparentes encima del vídeo, sin tener que salir de pantalla completa para marcar.">
         <input type="checkbox" id="chkPanelEnFullscreen" style="width:auto"> Panel en pantalla completa
+      </label>
+      <label style="display:flex;align-items:center;gap:4px;font-size:10px;white-space:nowrap" title="Al poner pantalla completa, el quinteto en pista (para hacer cambios) queda flotando semi-transparente encima del vídeo, igual que el panel de categorías pero por separado.">
+        <input type="checkbox" id="chkQuintetoEnFullscreen" style="width:auto"> Quinteto en pantalla completa
+      </label>
+      <label style="display:flex;align-items:center;gap:4px;font-size:10px;white-space:nowrap" title="Ajusta cuánto se ve el vídeo por detrás de los paneles que flotan encima en pantalla completa.">
+        Transparencia
+        <input type="range" id="rangoTransparenciaFS" min="30" max="95" value="78" style="width:70px;padding:0">
       </label>
       <span style="flex:1"></span>
       <span id="estadoFuente" style="color:var(--muted);font-size:11px"></span>
@@ -688,7 +715,7 @@ input:focus,select:focus,button:focus-visible{outline:2px solid var(--rojo);outl
 
   <div class="resize-v" id="resizeLat" title="Arrastra para agrandar o achicar el panel lateral (doble clic para restaurar)"></div>
 
-  <div class="lat">
+  <div class="lat" id="lat">
     <div class="sec" style="flex:1">
       <div style="display:flex;align-items:center;justify-content:space-between;gap:6px;margin-bottom:9px">
         <h3 style="margin-bottom:0">Quinteto en pista</h3>
@@ -1441,41 +1468,84 @@ function alternarPantallaCompleta(){
   }
 }
 
-// Con "Panel en pantalla completa" activado, el panel de categorías (#marcaje, que incluye
-// el interruptor Propio/Rival y la ventana de asignar) se traslada DENTRO de #videoZona al
-// entrar en pantalla completa, para que siga viéndose (flotando, semi-transparente) sin
-// tener que salir de pantalla completa para marcar — y vuelve a su sitio de siempre al salir.
-// Se engancha a 'fullscreenchange' (no al botón) para que también se deshaga solo si se sale
-// con Esc, y se vuelve a comprobar si se (des)marca la casilla estando ya en pantalla completa.
-function actualizarPanelEnPantallaCompleta(){
-  const marcaje=document.getElementById('marcaje');
+// Con "Panel en pantalla completa" y/o "Quinteto en pantalla completa" activados, los nodos
+// correspondientes se trasladan DENTRO de #videoZona al entrar en pantalla completa, para
+// que sigan viéndose (flotando, semi-transparentes) sin tener que salir de pantalla completa
+// para marcar o hacer un cambio — y cada uno vuelve a su sitio de siempre al salir. "Panel en
+// pantalla completa" cubre #marcaje (categorías + interruptor Propio/Rival + ventana de
+// asignar) Y #ubicacionModal (la ubicación en el campo), porque las dos forman parte del
+// mismo gesto de marcar un evento; "Quinteto en pantalla completa" es aparte, cubre #lat
+// (quinteto en pista + últimos cambios), porque es una acción independiente de marcar.
+// Se engancha a 'fullscreenchange' (no a los botones/casillas) para que también se deshaga
+// solo si se sale con Esc, y se vuelve a comprobar si se (des)marca alguna casilla estando ya
+// en pantalla completa.
+function actualizarOverlaysPantallaCompleta(){
   const zona=document.getElementById('videoZona');
-  if(!marcaje || !zona) return;
+  if(!zona) return;
   const fsEl=document.fullscreenElement || document.webkitFullscreenElement;
-  const conPanel=document.getElementById('chkPanelEnFullscreen').checked;
-  const debeFlotar = fsEl===zona && conPanel;
-  const yaFlota = marcaje.classList.contains('marcaje-flotante');
-  if(debeFlotar===yaFlota) return;
-  if(debeFlotar){
+  const enFullscreen = fsEl===zona;
+  const conPanel = enFullscreen && document.getElementById('chkPanelEnFullscreen').checked;
+  const conQuinteto = enFullscreen && document.getElementById('chkQuintetoEnFullscreen').checked;
+
+  const marcaje=document.getElementById('marcaje');
+  if(conPanel && marcaje.parentElement!==zona){
     zona.appendChild(marcaje);
     marcaje.classList.add('marcaje-flotante');
-  }else{
+  }else if(!conPanel && marcaje.parentElement===zona){
     document.getElementById('resizeCat').insertAdjacentElement('afterend', marcaje);
     marcaje.classList.remove('marcaje-flotante');
   }
-  // El ancho disponible cambia mucho al mover el panel (el vídeo a pantalla completa mide
-  // mucho más que el hueco normal del panel), y el tamaño de cada categoría se guarda en
-  // píxeles reales de SU contenedor (ver pintarGridCategorias): hay que repintar la rejilla
-  // con el ancho nuevo, si no los botones salen desproporcionados.
+
+  const ubicacionModal=document.getElementById('ubicacionModal');
+  if(conPanel && ubicacionModal.parentElement!==zona){
+    zona.appendChild(ubicacionModal);
+    ubicacionModal.classList.add('modal-flotante');
+  }else if(!conPanel && ubicacionModal.parentElement===zona){
+    document.getElementById('modal').insertAdjacentElement('afterend', ubicacionModal);
+    ubicacionModal.classList.remove('modal-flotante');
+  }
+
+  const lat=document.getElementById('lat');
+  if(conQuinteto && lat.parentElement!==zona){
+    zona.appendChild(lat);
+    lat.classList.add('lat-flotante');
+  }else if(!conQuinteto && lat.parentElement===zona){
+    document.getElementById('resizeLat').insertAdjacentElement('afterend', lat);
+    lat.classList.remove('lat-flotante');
+  }
+
+  // El ancho disponible cambia mucho al mover el panel de categorías (el vídeo a pantalla
+  // completa mide mucho más que el hueco normal del panel), y el tamaño de cada categoría se
+  // guarda en píxeles reales de SU contenedor (ver pintarGridCategorias): hay que repintar la
+  // rejilla con el ancho nuevo, si no los botones salen desproporcionados.
   renderPanelCategorias();
 }
-document.addEventListener('fullscreenchange', actualizarPanelEnPantallaCompleta);
-document.addEventListener('webkitfullscreenchange', actualizarPanelEnPantallaCompleta);
+document.addEventListener('fullscreenchange', actualizarOverlaysPantallaCompleta);
+document.addEventListener('webkitfullscreenchange', actualizarOverlaysPantallaCompleta);
 document.getElementById('chkPanelEnFullscreen').checked = !!cargarLayoutGuardado().panelEnFullscreen;
 document.getElementById('chkPanelEnFullscreen').onchange = e=>{
   guardarLayout({panelEnFullscreen: e.target.checked});
-  actualizarPanelEnPantallaCompleta();
+  actualizarOverlaysPantallaCompleta();
 };
+document.getElementById('chkQuintetoEnFullscreen').checked = !!cargarLayoutGuardado().quintetoEnFullscreen;
+document.getElementById('chkQuintetoEnFullscreen').onchange = e=>{
+  guardarLayout({quintetoEnFullscreen: e.target.checked});
+  actualizarOverlaysPantallaCompleta();
+};
+
+// Un único mando de transparencia para todos los paneles flotantes (--fs-alpha, ver el CSS
+// de .marcaje-flotante/.modal-flotante/.lat-flotante): no hace falta ajustar cada uno por
+// separado. Se guarda igual que el resto de preferencias de interfaz de este navegador.
+(function(){
+  const rango=document.getElementById('rangoTransparenciaFS');
+  const guardado=cargarLayoutGuardado().transparenciaFS;
+  rango.value = guardado!=null ? guardado : rango.value;
+  document.documentElement.style.setProperty('--fs-alpha', (rango.value/100).toFixed(2));
+  rango.oninput = ()=>{
+    document.documentElement.style.setProperty('--fs-alpha', (rango.value/100).toFixed(2));
+  };
+  rango.onchange = ()=>{ guardarLayout({transparenciaFS: Number(rango.value)}); };
+})();
 
 // corte: true = además de estadística, este evento en concreto genera clip exportable
 // (tecla sola = false, Shift+tecla o botón "Corte" con el ratón = true). En modo manual
