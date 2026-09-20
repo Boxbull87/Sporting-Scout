@@ -4291,6 +4291,28 @@ function pintarGridCategorias(contId, panelId){
     clearTimeout(guardarLayoutTimeout);
     guardarLayoutTimeout = setTimeout(guardarLayoutPanelActivo, 400);
   });
+  // El "salto": por defecto, si al mover/redimensionar un botón este choca con otro,
+  // Gridstack reubica al vecino para hacerle sitio — y si ese vecino a su vez choca con un
+  // tercero, lo empuja también, en cascada. Con una rejilla de 40 columnas eso puede mandar
+  // botones que no habías tocado varias filas más abajo de donde estaban, que es justo lo
+  // que se reportó ("sigue habiendo mucho salto" al agrandar o encoger un icono).
+  // Arreglo: mientras dura CADA arrastre/redimensionado se bloquean (`locked`) todos los
+  // botones menos el que se está tocando. Un botón bloqueado no puede ser desplazado por
+  // Gridstack para hacer sitio a otro — así, el resto de la disposición queda intacta pase
+  // lo que pase. Si el propio botón que se está tocando no cabe donde lo llevas sin invadir
+  // a un vecino (bloqueado), es él quien cede: Gridstack lo manda al primer hueco libre en vez
+  // de arrastrar contigo a nadie más. Se restaura el bloqueo nada más soltar.
+  function bloquearOtrosBotones_(elActivo){
+    const idActivo = elActivo && elActivo.gridstackNode && elActivo.gridstackNode.id;
+    gsPanel.engine.nodes.forEach(n=>{ n.locked = (n.id !== idActivo); });
+  }
+  function desbloquearBotones_(){
+    gsPanel.engine.nodes.forEach(n=>{ n.locked = false; });
+  }
+  gsPanel.on('dragstart', (ev, el)=>bloquearOtrosBotones_(el));
+  gsPanel.on('resizestart', (ev, el)=>bloquearOtrosBotones_(el));
+  gsPanel.on('dragstop', desbloquearBotones_);
+  gsPanel.on('resizestop', desbloquearBotones_);
 }
 
 // Vuelca las posiciones/tamaños actuales del grid en las categorías del panel activo y
