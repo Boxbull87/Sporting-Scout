@@ -1442,8 +1442,8 @@ function marcar(catId, corte){
       estado.eventos.sort((a,b)=>a.t_mark-b.t_mark);
       pintarTimeline();
       guardar();
-      if(cat.ubicacion) abrirUbicacionCampo(ev, cat, ()=>abrirRapida(ev,cat));
-      else abrirRapida(ev,cat);
+      if(cat.ubicacion) abrirUbicacionCampo(ev, cat, ()=>abrirRapidaSiProcede(ev,cat));
+      else abrirRapidaSiProcede(ev,cat);
     } else {
       // primera pulsación: abre el evento y empieza a crecer en la timeline
       const ev = nuevoEvento(cat, Math.max(0,t-(cat.pre||0)), t, t, corte);
@@ -1465,8 +1465,16 @@ function marcar(catId, corte){
   parpadeo(cat.id);
   pintarTimeline();
   guardar();
-  if(cat.ubicacion) abrirUbicacionCampo(ev, cat, ()=>abrirRapida(ev,cat));
-  else abrirRapida(ev, cat);
+  if(cat.ubicacion) abrirUbicacionCampo(ev, cat, ()=>abrirRapidaSiProcede(ev,cat));
+  else abrirRapidaSiProcede(ev, cat);
+}
+
+// La categoría se marca y se guarda siempre igual; esto solo decide si además se abre la
+// ventana de asignar jugador/resultado (cat.preguntarJugador===false la desactiva). No toca
+// nada de "ubicación en el campo", que es una pregunta aparte.
+function abrirRapidaSiProcede(ev, cat){
+  if(cat.preguntarJugador===false) return;
+  abrirRapida(ev, cat);
 }
 
 function parpadeo(catId){
@@ -3980,6 +3988,9 @@ function renderCategorias(){
       <label style="display:flex;align-items:center;gap:6px;font-size:12px">
         <input type="checkbox" id="cStats" ${!editando||editando.stats!==false?'checked':''}> Incluir en Estadísticas
       </label>
+      <label style="display:flex;align-items:center;gap:6px;font-size:12px" title="Si lo desmarcas, al marcar esta categoría el evento se guarda directamente sin abrir la ventana de asignar jugador (y resultado, si tiene). Podrás seguir viendo y borrando el evento desde Eventos, solo que sin jugador asignado.">
+        <input type="checkbox" id="cPreguntarJugador" ${!editando||editando.preguntarJugador!==false?'checked':''}> Preguntar jugador al marcar
+      </label>
       <label style="display:flex;align-items:center;gap:6px;font-size:12px" title="Cuenta esta categoría en la tabla de Estadísticas → Por quinteto (solo equipo propio)">
         <input type="checkbox" id="cCruzaQuinteto" ${editando&&editando.cruzaQuinteto?'checked':''}> Cruzar con quinteto
       </label>
@@ -4020,6 +4031,7 @@ function guardarCategoria(){
   const post = Math.max(0, parseFloat(document.getElementById('cPost').value)||0);
   const resultados = document.getElementById('cResultados').value.split(',').map(s=>s.trim()).filter(Boolean);
   const stats = document.getElementById('cStats').checked;
+  const preguntarJugador = document.getElementById('cPreguntarJugador').checked;
   const cruzaQuinteto = document.getElementById('cCruzaQuinteto').checked;
   const indGol = document.getElementById('cIndGol').checked;
   const indOcasion = document.getElementById('cIndOcasion').checked;
@@ -4037,10 +4049,10 @@ function guardarCategoria(){
 
   if(editandoCategoria){
     const c = estado.categorias.find(c=>c.id===editandoCategoria);
-    Object.assign(c,{nom,corto,tecla,color,modo,pre,post,resultados,stats,cruzaQuinteto,indGol,indOcasion,ubicacion,equipoFijo});
+    Object.assign(c,{nom,corto,tecla,color,modo,pre,post,resultados,stats,preguntarJugador,cruzaQuinteto,indGol,indOcasion,ubicacion,equipoFijo});
   } else {
     estado.categorias.push({id:idUnicoCategoria(nom), nom, corto, tecla, color, pre, post, modo,
-      resultados, stats, cruzaQuinteto, indGol, indOcasion, ubicacion, equipoFijo, activa:true});
+      resultados, stats, preguntarJugador, cruzaQuinteto, indGol, indOcasion, ubicacion, equipoFijo, activa:true});
   }
   editandoCategoria=null;
   guardarPanelActivo();
