@@ -210,6 +210,22 @@ input:focus,select:focus,button:focus-visible{outline:2px solid var(--rojo);outl
 .video-zona:fullscreen{width:100vw;height:100vh}
 .video-zona:-webkit-full-screen{width:100vw;height:100vh}
 
+/* ---------- Panel de categorías flotando ENCIMA del vídeo en pantalla completa ----------
+   Con "Panel en pantalla completa" activado (ver chkPanelEnFullscreen), al entrar en
+   pantalla completa el propio nodo #marcaje se traslada dentro de #videoZona (ver
+   actualizarPanelEnPantallaCompleta más abajo) — solo lo que esté DENTRO del elemento que
+   está en :fullscreen se sigue viendo, así que no basta con posicionarlo con CSS, hay que
+   moverlo de verdad. Al salir de pantalla completa (o desactivar la opción) vuelve a su
+   sitio de siempre, debajo de la línea de tiempo. */
+.marcaje.marcaje-flotante{
+  position:absolute;left:0;right:0;bottom:0;z-index:18;
+  max-height:58%;border-top:1px solid var(--line);border-radius:8px 8px 0 0;
+  background:rgba(14,16,19,.78);
+}
+.marcaje.marcaje-flotante .cat{background:rgba(30,34,42,.7)}
+.marcaje.marcaje-flotante .rapida{background:rgba(30,34,42,.85)}
+.marcaje.marcaje-flotante .equipo-sw button{background:rgba(30,34,42,.7)}
+
 /* pantalla de carga de fuente */
 .fuente{
   position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;
@@ -605,6 +621,9 @@ input:focus,select:focus,button:focus-visible{outline:2px solid var(--rojo);outl
         <option value="16">16 px/s</option>
       </select>
       <button class="tbtn" id="btnFullscreen" title="Pantalla completa">⛶</button>
+      <label style="display:flex;align-items:center;gap:4px;font-size:10px;margin-left:6px;white-space:nowrap" title="Al poner pantalla completa, el panel de categorías y la ventana de asignar (jugador, resultado, título...) quedan flotando semi-transparentes encima del vídeo, sin tener que salir de pantalla completa para marcar.">
+        <input type="checkbox" id="chkPanelEnFullscreen" style="width:auto"> Panel en pantalla completa
+      </label>
       <span style="flex:1"></span>
       <span id="estadoFuente" style="color:var(--muted);font-size:11px"></span>
     </div>
@@ -1421,6 +1440,42 @@ function alternarPantallaCompleta(){
     entrarFn.call(zona).catch(()=>toast('No se pudo poner en pantalla completa.'));
   }
 }
+
+// Con "Panel en pantalla completa" activado, el panel de categorías (#marcaje, que incluye
+// el interruptor Propio/Rival y la ventana de asignar) se traslada DENTRO de #videoZona al
+// entrar en pantalla completa, para que siga viéndose (flotando, semi-transparente) sin
+// tener que salir de pantalla completa para marcar — y vuelve a su sitio de siempre al salir.
+// Se engancha a 'fullscreenchange' (no al botón) para que también se deshaga solo si se sale
+// con Esc, y se vuelve a comprobar si se (des)marca la casilla estando ya en pantalla completa.
+function actualizarPanelEnPantallaCompleta(){
+  const marcaje=document.getElementById('marcaje');
+  const zona=document.getElementById('videoZona');
+  if(!marcaje || !zona) return;
+  const fsEl=document.fullscreenElement || document.webkitFullscreenElement;
+  const conPanel=document.getElementById('chkPanelEnFullscreen').checked;
+  const debeFlotar = fsEl===zona && conPanel;
+  const yaFlota = marcaje.classList.contains('marcaje-flotante');
+  if(debeFlotar===yaFlota) return;
+  if(debeFlotar){
+    zona.appendChild(marcaje);
+    marcaje.classList.add('marcaje-flotante');
+  }else{
+    document.getElementById('resizeCat').insertAdjacentElement('afterend', marcaje);
+    marcaje.classList.remove('marcaje-flotante');
+  }
+  // El ancho disponible cambia mucho al mover el panel (el vídeo a pantalla completa mide
+  // mucho más que el hueco normal del panel), y el tamaño de cada categoría se guarda en
+  // píxeles reales de SU contenedor (ver pintarGridCategorias): hay que repintar la rejilla
+  // con el ancho nuevo, si no los botones salen desproporcionados.
+  renderPanelCategorias();
+}
+document.addEventListener('fullscreenchange', actualizarPanelEnPantallaCompleta);
+document.addEventListener('webkitfullscreenchange', actualizarPanelEnPantallaCompleta);
+document.getElementById('chkPanelEnFullscreen').checked = !!cargarLayoutGuardado().panelEnFullscreen;
+document.getElementById('chkPanelEnFullscreen').onchange = e=>{
+  guardarLayout({panelEnFullscreen: e.target.checked});
+  actualizarPanelEnPantallaCompleta();
+};
 
 // corte: true = además de estadística, este evento en concreto genera clip exportable
 // (tecla sola = false, Shift+tecla o botón "Corte" con el ratón = true). En modo manual
