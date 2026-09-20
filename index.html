@@ -724,7 +724,10 @@ input:focus,select:focus,button:focus-visible{outline:2px solid var(--rojo);outl
       <div class="quinteto-grid" id="quintetoGrid"></div>
     </div>
     <div class="sec">
-      <h3>Últimos cambios</h3>
+      <div style="display:flex;align-items:center;justify-content:space-between;gap:6px;margin-bottom:9px">
+        <h3 style="margin-bottom:0">Últimos cambios</h3>
+        <button class="btn" style="padding:2px 7px;font-size:10px" onclick="abrirHistorialQuinteto()" title="Ver y corregir el registro completo de entradas/salidas del partido">Ver todo</button>
+      </div>
       <div id="quintetoHistorial" style="font-size:11px;color:var(--muted)">Sin cambios todavía.</div>
     </div>
     <div class="sec">
@@ -1842,6 +1845,90 @@ function renderHistorialQuinteto(){
       <span>${tc(c.t)}</span>
     </div>`;
   }).join('');
+}
+
+/* ---------- Registro completo de cambios de quinteto (ver/corregir) ----------
+   El panel lateral solo enseña los últimos 12 y no deja tocarlos. Aquí se ve el registro
+   entero (estado.cambiosQuinteto) y se puede corregir cada entrada — momento, jugador o si
+   entra/sale — o borrarla si está mal. Tras cualquier edición, estado.enPista (lo que se ve
+   como "en pista ahora" en el panel lateral) se recalcula desde cero a partir del registro ya
+   corregido (mismo criterio cronológico que usan las estadísticas por quinteto, ver
+   intervalosQuinteto), así el panel en vivo deja de depender de que hayas ido pulsando los
+   botones en el orden "correcto" mientras saltabas adelante y atrás en el vídeo. */
+function abrirHistorialQuinteto(){
+  renderHistorialCompletoQuinteto();
+}
+function renderHistorialCompletoQuinteto(){
+  const filas = [...estado.cambiosQuinteto].sort((a,b)=>a.t-b.t).map(c=>{
+    const jugadorActual = estado.plantillaPropia.some(j=>j.id===c.jugadorId);
+    const opcionesJugador =
+      (jugadorActual? '' : `<option value="${c.jugadorId}" selected disabled>(jugador no encontrado)</option>`) +
+      estado.plantillaPropia.map(j=>
+        `<option value="${j.id}" ${j.id===c.jugadorId?'selected':''}>#${j.dorsal} ${j.nombre||''}</option>`
+      ).join('');
+    return `<tr>
+      <td class="tc" style="white-space:nowrap">
+        <button class="btn" style="padding:2px 6px" onclick="ajustarTiempoCambioQuinteto('${c.id}',-1)">−1s</button>
+        <span onclick="Reproductor.ir(${c.t})" style="cursor:pointer" title="Saltar a este momento">${tc(c.t)}</span>
+        <button class="btn" style="padding:2px 6px" onclick="ajustarTiempoCambioQuinteto('${c.id}',1)">+1s</button>
+        <button class="btn" style="padding:2px 6px" onclick="usarMomentoActualCambioQuinteto('${c.id}')" title="Poner el momento actual del vídeo">📍</button>
+      </td>
+      <td><select onchange="cambiarJugadorCambioQuinteto('${c.id}', this.value)" style="font-size:11px">${opcionesJugador}</select></td>
+      <td>
+        <select onchange="cambiarTipoCambioQuinteto('${c.id}', this.value)" style="font-size:11px">
+          <option value="entra" ${c.dentro?'selected':''}>Entra</option>
+          <option value="sale" ${!c.dentro?'selected':''}>Sale</option>
+        </select>
+      </td>
+      <td class="tc"><button class="btn" style="padding:2px 6px" onclick="borrarCambioQuinteto('${c.id}')" title="Borrar esta entrada">🗑</button></td>
+    </tr>`;
+  }).join('');
+  modal('Registro de cambios de quinteto', `
+    <p class="muted" style="font-size:11px;margin-bottom:10px">
+      Todas las entradas/salidas registradas, en orden cronológico. Corrige el momento, el
+      jugador o si entra/sale, o bórrala si está mal — el quinteto en pista del panel lateral
+      se recalcula solo a partir de este registro.
+    </p>
+    <div style="overflow-x:auto"><table class="tabla">
+      <thead><tr><th>Momento</th><th>Jugador</th><th>Tipo</th><th></th></tr></thead>
+      <tbody>${filas || '<tr><td colspan="4" class="vacio">Sin cambios todavía.</td></tr>'}</tbody>
+    </table></div>`);
+}
+function ajustarTiempoCambioQuinteto(id, delta){
+  const c=estado.cambiosQuinteto.find(x=>x.id===id);
+  if(!c) return;
+  c.t=Math.max(0, c.t+delta);
+  tocarCambioQuinteto();
+}
+function usarMomentoActualCambioQuinteto(id){
+  const c=estado.cambiosQuinteto.find(x=>x.id===id);
+  if(!c) return;
+  c.t=Reproductor.tiempo();
+  tocarCambioQuinteto();
+}
+function cambiarJugadorCambioQuinteto(id, jugadorId){
+  const c=estado.cambiosQuinteto.find(x=>x.id===id);
+  if(!c) return;
+  c.jugadorId=jugadorId;
+  tocarCambioQuinteto();
+}
+function cambiarTipoCambioQuinteto(id, valor){
+  const c=estado.cambiosQuinteto.find(x=>x.id===id);
+  if(!c) return;
+  c.dentro = valor==='entra';
+  tocarCambioQuinteto();
+}
+function borrarCambioQuinteto(id){
+  if(!confirm('¿Borrar esta entrada del registro de cambios?')) return;
+  estado.cambiosQuinteto = estado.cambiosQuinteto.filter(x=>x.id!==id);
+  tocarCambioQuinteto();
+}
+function tocarCambioQuinteto(){
+  const intervalos=intervalosQuinteto();
+  estado.enPista = intervalos.length? intervalos[intervalos.length-1].jugadores.slice() : [];
+  guardar();
+  renderQuinteto();
+  if(document.getElementById('modal').classList.contains('abierto')) renderHistorialCompletoQuinteto();
 }
 
 /* =====================================================================
