@@ -4175,10 +4175,12 @@ function botonPlay(){
 /* =====================================================================
    PANEL DE CATEGORÍAS: grid arrastrable/redimensionable (Gridstack.js)
    =====================================================================
-   Cada categoría guarda su posición/tamaño de rejilla en sí misma (c.gx, c.gy,
-   c.gw, c.gh — columna, fila, ancho y alto en celdas). Si faltan (categoría
-   nueva, o un panel creado antes de este cambio), Gridstack la coloca sola en
-   el primer hueco libre — no hace falta ninguna migración de datos.
+   Cada categoría guarda su posición/tamaño en sí misma (c.gx, c.gy, c.gw, c.gh —
+   posición y tamaño en PÍXELES reales del panel). Si faltan (categoría nueva, o un
+   panel creado antes de este cambio), Gridstack la coloca sola en el primer hueco
+   libre. Los paneles con datos de la escala antigua (columnas de una rejilla de 40 /
+   celdas fijas de 8px) se convierten solos la primera vez que se pintan — ver la
+   migración marcada con "escalaPx" en pintarGridCategorias.
 
    MODO PARTIDO (por defecto): el grid está "estático" — Gridstack no deja
    arrastrar ni redimensionar, y cada botón .cat pulsa marcar() exactamente
@@ -4191,6 +4193,12 @@ function botonPlay(){
 let gsPanel = null;           // instancia Gridstack activa
 let modoEdicionPanel = false;
 let guardarLayoutTimeout = null;
+// gx/gy/gw/gh se guardan en PÍXELES reales (1 unidad de Gridstack = 1px): así, el tamaño
+// que sueltas al redimensionar es el que se queda guardado, ni el más cercano de una rejilla
+// gorda ni el de al lado. 104×80 es, en píxeles, el tamaño que tenía siempre un botón nunca
+// tocado (antes "10×10 celdas" de una rejilla de 40 columnas / 8px de alto).
+const CAT_ANCHO_DEFECTO_PX = 104;
+const CAT_ALTO_DEFECTO_PX = 80;
 
 function renderPanelCategorias(){
   pintarGridCategorias('cats', estado.panelActivoId);
@@ -4210,21 +4218,52 @@ function pintarGridCategorias(contId, panelId){
   }
   cont.innerHTML='';
   cont.classList.add('grid-stack');
+
+  // ---- Migración a píxeles reales (una sola vez por categoría) ----
+  // Hasta ahora gx/gw se guardaban en "columnas de una rejilla de 40 que ocupa todo el
+  // ancho del panel" y gy/gh en celdas fijas de 8px. Aunque el arrastre en pantalla se
+  // sentía fino, el tamaño FINAL siempre se redondeaba a uno de esos 40 pasos posibles —
+  // por eso pedir, p.ej., 108px de ancho podía acabar guardado como el equivalente a 100 o
+  // a 120. Se convierte cada categoría, una sola vez (marcada con "escalaPx" para no
+  // repetirlo ni desmadrarlo en la siguiente carga), usando el ancho actual del panel para
+  // no perder la disposición que ya tenías. A partir de aquí gx/gy/gw/gh son ya píxeles
+  // reales: lo que sueltas es, exactamente, lo que se guarda.
+  const anchoContenedorMedidoPx = cont.getBoundingClientRect().width;
+  const anchoContenedorPx = Math.round(anchoContenedorMedidoPx) || 400;
+  // Si todavía no hay un ancho de verdad (panel oculto o a medio pintar: pasa justo tras
+  // entrar en la app, antes de que el layout se asiente), NO se migra con un ancho
+  // inventado — se dejaría mal calculada para siempre (escalaPx ya marcada). Se reintenta
+  // solo en el siguiente repintado real (cambiar de panel, añadir/quitar botón, etc.).
+  const anchoFiable = anchoContenedorMedidoPx > 0;
+  let huboMigracion = false;
+  catsActivasDePanel(panelId).forEach(c=>{
+    if(c.escalaPx || !anchoFiable) return;
+    if(c.gx!=null || c.gy!=null || c.gw!=null || c.gh!=null){
+      if(c.gx!=null) c.gx = Math.round(c.gx * anchoContenedorPx/40);
+      if(c.gw!=null) c.gw = Math.round(c.gw * anchoContenedorPx/40);
+      if(c.gy!=null) c.gy = c.gy*8;
+      if(c.gh!=null) c.gh = c.gh*8;
+      huboMigracion = true;
+    }
+    c.escalaPx = true;
+  });
+  if(huboMigracion) guardarPanelActivo();
+
   catsActivasDePanel(panelId).forEach(c=>{
     const item=document.createElement('div');
     item.className='grid-stack-item';
     item.setAttribute('gs-id', c.id);
     if(c.gx!=null) item.setAttribute('gs-x', c.gx);
     if(c.gy!=null) item.setAttribute('gs-y', c.gy);
-    // 10×10 celdas ≈ el tamaño de botón de siempre (rejilla de 40 columnas, celdas de 8px):
-    // es solo el valor por defecto de una categoría que nunca se ha redimensionado.
+    // 104×80px ≈ el tamaño de botón de siempre: es solo el valor por defecto de una
+    // categoría que nunca se ha redimensionado.
     // OJO: aquí NO se puede "corregir" un tamaño por parecer pequeño. Antes había un
-    // salvavidas (`c.gw>4? c.gw : 10`) pensado para datos de la rejilla vieja de 4 columnas,
-    // pero hacía que cualquier botón que encogieras por debajo de 4 celdas volviera solo a 10
-    // en el siguiente repintado, chocara con los vecinos y descolocara el panel entero en
+    // salvavidas pensado para datos de una rejilla vieja de menos columnas, pero hacía que
+    // cualquier botón que encogieras lo suficiente volviera solo al tamaño por defecto en
+    // el siguiente repintado, chocara con los vecinos y descolocara el panel entero en
     // cascada. Para arreglar una disposición heredada está el botón "Restablecer disposición".
-    item.setAttribute('gs-w', c.gw || 10);
-    item.setAttribute('gs-h', c.gh || 10);
+    item.setAttribute('gs-w', c.gw || CAT_ANCHO_DEFECTO_PX);
+    item.setAttribute('gs-h', c.gh || CAT_ALTO_DEFECTO_PX);
 
     const content=document.createElement('div');
     content.className='grid-stack-item-content';
@@ -4262,14 +4301,15 @@ function pintarGridCategorias(contId, panelId){
     cont.appendChild(item);
   });
 
-  // column/cellHeight finos a propósito: con solo 4 columnas cada celda ocupaba ~1/4 del
-  // panel entero (50-80px de golpe), así que redimensionar "saltaba" a esos pocos tamaños
-  // posibles y no se podía bajar de ahí. Con una rejilla mucho más fina (40 columnas,
-  // celdas de 8px de alto) cada paso es de pocos píxeles — se siente como libre, aunque
-  // por debajo siga habiendo una rejilla (necesaria para que no se superpongan botones).
+  // column = ancho actual del panel en píxeles y cellHeight = 1px: así 1 unidad de Gridstack
+  // es 1 píxel real (por eso la migración de arriba y los defaults CAT_*_PX están en píxeles).
+  // Con esto, el tamaño que sueltas al redimensionar es exactamente el que se guarda, no el
+  // más cercano dentro de una rejilla más gorda (que es lo que causaba que, p.ej., pedir
+  // 108px acabase guardado como 100 o 120). Sigue habiendo una "rejilla" por debajo (Gridstack
+  // la necesita para no superponer botones), pero al ser de 1px es indistinguible de libre.
   gsPanel = GridStack.init({
-    column: 40,
-    cellHeight: 8,
+    column: Math.max(anchoContenedorPx, 40),
+    cellHeight: 1,
     margin: 4,
     float: true,               // no compacta huecos: la posición que dejes se queda donde la dejes
     staticGrid: !modoEdicionPanel,
@@ -4323,8 +4363,10 @@ function guardarLayoutPanelActivo(){
   const panel = estado.paneles.find(p=>p.id===estado.panelActivoId);
   if(!panel) return;
   // save() omite w/h cuando valen 1 y x/y cuando valen 0 (son los valores por defecto de
-  // Gridstack), así que hay que reponerlos a mano: si no, un botón encogido al mínimo se
-  // guardaba con gw/gh = undefined y al repintar volvía al tamaño por defecto (10).
+  // Gridstack), así que hay que reponerlos a mano: si no, un botón encogido al mínimo (1px)
+  // se guardaba con gw/gh = undefined y al repintar volvía al tamaño por defecto
+  // (CAT_ANCHO_DEFECTO_PX/CAT_ALTO_DEFECTO_PX). nodo.x/y/w/h ya vienen en píxeles reales
+  // (ver el column/cellHeight de GridStack.init más arriba), así que no hace falta convertir.
   gsPanel.save(false).forEach(nodo=>{
     const c = panel.categorias.find(x=>x.id===nodo.id);
     if(c){ c.gx=nodo.x||0; c.gy=nodo.y||0; c.gw=nodo.w||1; c.gh=nodo.h||1; }
