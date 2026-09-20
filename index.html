@@ -648,6 +648,7 @@ input:focus,select:focus,button:focus-visible{outline:2px solid var(--rojo);outl
           </div>
           <div class="dorsales" id="rapidaDorsales"></div>
           <div class="resultados" id="rapidaResultados"></div>
+          <div id="rapidaTituloCampo" style="margin-top:4px"></div>
           <div id="rapidaUbicacion" style="margin-top:4px"></div>
           <div class="ajuste-tiempo" id="rapidaAjuste" style="margin-top:8px"></div>
         </div>
@@ -1470,10 +1471,11 @@ function marcar(catId, corte){
 }
 
 // La categoría se marca y se guarda siempre igual; esto solo decide si además se abre la
-// ventana de asignar jugador/resultado (cat.preguntarJugador===false la desactiva). No toca
-// nada de "ubicación en el campo", que es una pregunta aparte.
+// ventana de asignar jugador/resultado (cat.preguntarJugador===false la desactiva) y/o pedir
+// el título del clip (cat.preguntarTitulo la activa, apagada por defecto). Si ninguna de las
+// dos aplica no hace falta abrir nada. No toca "ubicación en el campo", que es aparte.
 function abrirRapidaSiProcede(ev, cat){
-  if(cat.preguntarJugador===false) return;
+  if(cat.preguntarJugador===false && !cat.preguntarTitulo) return;
   abrirRapida(ev, cat);
 }
 
@@ -1499,36 +1501,42 @@ function abrirRapida(ev,cat){
 
   pintarAjuste(ev);
 
+  // cat.preguntarJugador===false apaga esta parte (jugador + resultados) entera, igual que
+  // ya decide si se abre o no toda la ventana (ver abrirRapidaSiProcede); cat.preguntarTitulo
+  // es independiente, más abajo.
+  const mostrarAsignacion = cat.preguntarJugador!==false;
   const cd=document.getElementById('rapidaDorsales');
   cd.innerHTML='';
-  if(!plantilla.length){
-    cd.innerHTML='<span style="color:var(--muted);font-size:11px">Sin jugadores cargados · '+
-      '<button class="btn" style="padding:3px 7px" onclick="abrirPlantillas()">Añadir</button></span>';
-  }else{
-    plantilla.forEach(j=>{
-      const b=document.createElement('button');
-      b.className='dorsal'+(ev.jugadorRef && ev.jugadorRef.id===j.id? ' on':'');
-      b.innerHTML=`<span class="dorsal-n">${j.dorsal}</span>`+(j.nombre?`<span class="dorsal-nom">${j.nombre}</span>`:'');
-      b.title=j.nombre||('Dorsal '+j.dorsal);
-      b.onclick=()=>{ ev.jugadorRef={tipo:ev.equipo,id:j.id};
-        // etiqueta "congelada" en el propio evento: si el jugador se borra en Sporting
-        // más adelante, seguimos mostrando quién era en vez de romper la pantalla.
-        ev.jugadorEtiqueta='#'+j.dorsal+(j.nombre?' '+j.nombre:'');
-        pintarTimeline(); guardar();
-        cd.querySelectorAll('.dorsal').forEach(x=>x.classList.remove('on'));
-        b.classList.add('on');
-        // Si la categoría también tiene resultados por marcar (p.ej. "Tiro": quién +
-        // a puerta/fuera), no se cierra solo por elegir jugador: se espera a que se
-        // marque lo otro también, para no obligar a reabrir el evento desde Eventos.
-        if(!faltaAlgoPorMarcarRapida(ev,cat)) cerrarRapida();
-      };
-      cd.appendChild(b);
-    });
+  if(mostrarAsignacion){
+    if(!plantilla.length){
+      cd.innerHTML='<span style="color:var(--muted);font-size:11px">Sin jugadores cargados · '+
+        '<button class="btn" style="padding:3px 7px" onclick="abrirPlantillas()">Añadir</button></span>';
+    }else{
+      plantilla.forEach(j=>{
+        const b=document.createElement('button');
+        b.className='dorsal'+(ev.jugadorRef && ev.jugadorRef.id===j.id? ' on':'');
+        b.innerHTML=`<span class="dorsal-n">${j.dorsal}</span>`+(j.nombre?`<span class="dorsal-nom">${j.nombre}</span>`:'');
+        b.title=j.nombre||('Dorsal '+j.dorsal);
+        b.onclick=()=>{ ev.jugadorRef={tipo:ev.equipo,id:j.id};
+          // etiqueta "congelada" en el propio evento: si el jugador se borra en Sporting
+          // más adelante, seguimos mostrando quién era en vez de romper la pantalla.
+          ev.jugadorEtiqueta='#'+j.dorsal+(j.nombre?' '+j.nombre:'');
+          pintarTimeline(); guardar();
+          cd.querySelectorAll('.dorsal').forEach(x=>x.classList.remove('on'));
+          b.classList.add('on');
+          // Si la categoría también tiene resultados por marcar (p.ej. "Tiro": quién +
+          // a puerta/fuera), no se cierra solo por elegir jugador: se espera a que se
+          // marque lo otro también, para no obligar a reabrir el evento desde Eventos.
+          if(!faltaAlgoPorMarcarRapida(ev,cat)) cerrarRapida();
+        };
+        cd.appendChild(b);
+      });
+    }
   }
 
   const cr=document.getElementById('rapidaResultados');
   cr.innerHTML='';
-  cat.resultados.forEach(r=>{
+  if(mostrarAsignacion) cat.resultados.forEach(r=>{
     const b=document.createElement('button');
     b.className='res'+(ev.resultado===r? ' on':''); b.textContent=r;
     b.onclick=()=>{
@@ -1540,6 +1548,32 @@ function abrirRapida(ev,cat){
     };
     cr.appendChild(b);
   });
+
+  // Título del clip: cat.preguntarTitulo activa un campo de texto para escribirlo (o dejarlo
+  // en blanco y quedarse con el automático, "Gol 2"...) nada más marcar — mismo dato que ya
+  // se podía tocar a mano desde Eventos (ev.tituloOn/ev.tituloTexto), solo que aquí sale solo.
+  const ctt=document.getElementById('rapidaTituloCampo');
+  ctt.innerHTML='';
+  if(cat.preguntarTitulo){
+    if(!ev.tituloOn){ ev.tituloOn=true; guardar(); }
+    const lbl=document.createElement('label');
+    lbl.textContent='Título del clip';
+    lbl.style.cssText='display:block;font-size:11px;color:var(--muted);margin-bottom:2px';
+    const inp=document.createElement('input');
+    inp.type='text';
+    inp.value=ev.tituloTexto||'';
+    inp.placeholder=tituloAutomaticoEvento(ev);
+    inp.style.cssText='width:100%;font-size:12px';
+    inp.oninput=()=>{
+      ev.tituloTexto=inp.value;
+      guardar();
+      // Sigues escribiendo: que no se cierre solo a mitad de frase (ver el timeout de abajo).
+      clearTimeout(tempRapida);
+      tempRapida=setTimeout(cerrarRapida,12000);
+    };
+    ctt.appendChild(lbl);
+    ctt.appendChild(inp);
+  }
 
   const cu=document.getElementById('rapidaUbicacion');
   cu.innerHTML = cat.ubicacion
@@ -3991,6 +4025,9 @@ function renderCategorias(){
       <label style="display:flex;align-items:center;gap:6px;font-size:12px" title="Si lo desmarcas, al marcar esta categoría el evento se guarda directamente sin abrir la ventana de asignar jugador (y resultado, si tiene). Podrás seguir viendo y borrando el evento desde Eventos, solo que sin jugador asignado.">
         <input type="checkbox" id="cPreguntarJugador" ${!editando||editando.preguntarJugador!==false?'checked':''}> Preguntar jugador al marcar
       </label>
+      <label style="display:flex;align-items:center;gap:6px;font-size:12px" title="Al marcar esta categoría (en modo manual, al soltar/acabar la grabación) se abre un campo para escribir el título del clip. Si lo dejas en blanco se usa el automático (p.ej. 'Gol 2'). Es el mismo título que ya se puede tocar a mano desde Eventos.">
+        <input type="checkbox" id="cPreguntarTitulo" ${editando&&editando.preguntarTitulo?'checked':''}> Preguntar título al marcar
+      </label>
       <label style="display:flex;align-items:center;gap:6px;font-size:12px" title="Cuenta esta categoría en la tabla de Estadísticas → Por quinteto (solo equipo propio)">
         <input type="checkbox" id="cCruzaQuinteto" ${editando&&editando.cruzaQuinteto?'checked':''}> Cruzar con quinteto
       </label>
@@ -4032,6 +4069,7 @@ function guardarCategoria(){
   const resultados = document.getElementById('cResultados').value.split(',').map(s=>s.trim()).filter(Boolean);
   const stats = document.getElementById('cStats').checked;
   const preguntarJugador = document.getElementById('cPreguntarJugador').checked;
+  const preguntarTitulo = document.getElementById('cPreguntarTitulo').checked;
   const cruzaQuinteto = document.getElementById('cCruzaQuinteto').checked;
   const indGol = document.getElementById('cIndGol').checked;
   const indOcasion = document.getElementById('cIndOcasion').checked;
@@ -4049,10 +4087,10 @@ function guardarCategoria(){
 
   if(editandoCategoria){
     const c = estado.categorias.find(c=>c.id===editandoCategoria);
-    Object.assign(c,{nom,corto,tecla,color,modo,pre,post,resultados,stats,preguntarJugador,cruzaQuinteto,indGol,indOcasion,ubicacion,equipoFijo});
+    Object.assign(c,{nom,corto,tecla,color,modo,pre,post,resultados,stats,preguntarJugador,preguntarTitulo,cruzaQuinteto,indGol,indOcasion,ubicacion,equipoFijo});
   } else {
     estado.categorias.push({id:idUnicoCategoria(nom), nom, corto, tecla, color, pre, post, modo,
-      resultados, stats, preguntarJugador, cruzaQuinteto, indGol, indOcasion, ubicacion, equipoFijo, activa:true});
+      resultados, stats, preguntarJugador, preguntarTitulo, cruzaQuinteto, indGol, indOcasion, ubicacion, equipoFijo, activa:true});
   }
   editandoCategoria=null;
   guardarPanelActivo();
